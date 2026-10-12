@@ -1,0 +1,49 @@
+{
+  "id": "advisor",
+  "categories": [
+    "agent-orchestration"
+  ],
+  "name": "Advisor",
+  "description": "Experimental: reviews ongoing agent work on the session's own model and offers one short correction.",
+  "activation": {
+    "onStartup": true
+  },
+  "enabledByDefault": false,
+  "configGroups": [
+    {
+      "id": "reviews",
+      "title": "Reviews",
+      "order": 10,
+      "properties": ["everyToolCalls", "everyMinutes"]
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "everyToolCalls": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1000,
+        "default": 10
+      },
+      "everyMinutes": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1440,
+        "default": 20
+      }
+    },
+    "additionalProperties": false
+  },
+  "uiHints": {
+    "everyToolCalls": {
+      "label": "Review every N tool calls",
+      "help": "Review after this many tool calls start in a conversation, including during a run and commands still running in the background. 0 turns this trigger off."
+    },
+    "everyMinutes": {
+      "label": "Review every N minutes",
+      "help": "Review after this many minutes of accumulated agent run time in a conversation. 0 turns this trigger off."
+    }
+  },
+  "version": "2026.9.9"
+}
