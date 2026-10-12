@@ -24,6 +24,28 @@ import { swapStagedPackageInstall } from "./package-update-swap.js";
 import { createPackageSwapFixture } from "./package-update-swap.test-support.js";
 import * as capability from "./update-post-core-capability.js";
 
+async function prepareFixtureActivation(
+  f: Awaited<ReturnType<typeof createPackageSwapFixture>>,
+  fence: Parameters<typeof preparePackageActivation>[0]["options"]["fence"],
+) {
+  const reader = integrity.createPackageIntegrityReader();
+  return preparePackageActivation({
+    options: { fence, runtime: packageActivationRuntimeForTest(), onPrepared: () => {} },
+    installTarget: f.params.installTarget,
+    liveRoot: f.packageRoot,
+    stageRoot: f.params.stage.packageRoot,
+    launcherRoot: f.params.stage.layout.binDir,
+    binDir: path.dirname(f.launcher),
+    previous: await reader.tree(f.packageRoot),
+    launchers: [
+      {
+        name: "openclaw",
+        previous: encodePackageActivationLauncher(await reader.launcher(f.launcher)),
+      },
+    ],
+  });
+}
+
 const fixture = createPackageActivationLifetimeFixture();
 let root: string;
 beforeEach(() => {
@@ -54,22 +76,7 @@ it.skipIf(process.platform === "win32").each(["unchanged", "previous", "candidat
       vi.spyOn(Date, "now").mockReturnValue(Date.now() + 6_000);
       await withUpdateCommandExecutor(randomUUID(), async (executor) => {
         const fence = await executor.enter(f.packageRoot);
-        const reader = integrity.createPackageIntegrityReader();
-        const prepared = await preparePackageActivation({
-          options: { fence, runtime: packageActivationRuntimeForTest(), onPrepared: () => {} },
-          installTarget: f.params.installTarget,
-          liveRoot: f.packageRoot,
-          stageRoot: f.params.stage.packageRoot,
-          launcherRoot: f.params.stage.layout.binDir,
-          binDir: path.dirname(f.launcher),
-          previous: await reader.tree(f.packageRoot),
-          launchers: [
-            {
-              name: "openclaw",
-              previous: encodePackageActivationLauncher(await reader.launcher(f.launcher)),
-            },
-          ],
-        });
+        const prepared = await prepareFixtureActivation(f, fence);
         expect(prepared).toBeDefined();
         const tampered = path.join(
           changed === "previous" ? f.packageRoot : candidateRoot,
@@ -158,22 +165,7 @@ it.skipIf(process.platform === "win32").each([
       });
       await withUpdateCommandExecutor(randomUUID(), async (executor) => {
         const fence = await executor.enter(f.packageRoot);
-        const reader = integrity.createPackageIntegrityReader();
-        const prepared = await preparePackageActivation({
-          options: { fence, runtime: packageActivationRuntimeForTest(), onPrepared: () => {} },
-          installTarget: f.params.installTarget,
-          liveRoot: f.packageRoot,
-          stageRoot: f.params.stage.packageRoot,
-          launcherRoot: f.params.stage.layout.binDir,
-          binDir: path.dirname(f.launcher),
-          previous: await reader.tree(f.packageRoot),
-          launchers: [
-            {
-              name: "openclaw",
-              previous: encodePackageActivationLauncher(await reader.launcher(f.launcher)),
-            },
-          ],
-        });
+        const prepared = await prepareFixtureActivation(f, fence);
         expect(prepared).toBeDefined();
         await expect(
           prepared!.publish(false, () => {
@@ -353,22 +345,7 @@ it.skipIf(process.platform === "win32").each([
         });
       await withUpdateCommandExecutor(randomUUID(), async (executor) => {
         const fence = await executor.enter(f.packageRoot);
-        const reader = integrity.createPackageIntegrityReader();
-        const prepared = await preparePackageActivation({
-          options: { fence, runtime: packageActivationRuntimeForTest(), onPrepared: () => {} },
-          installTarget: f.params.installTarget,
-          liveRoot: f.packageRoot,
-          stageRoot: f.params.stage.packageRoot,
-          launcherRoot: f.params.stage.layout.binDir,
-          binDir: path.dirname(f.launcher),
-          previous: await reader.tree(f.packageRoot),
-          launchers: [
-            {
-              name: "openclaw",
-              previous: encodePackageActivationLauncher(await reader.launcher(f.launcher)),
-            },
-          ],
-        });
+        const prepared = await prepareFixtureActivation(f, fence);
         expect(prepared).toBeDefined();
         // Exercise the actual publication owner without the outer swap's automatic
         // compensation, leaving the interrupted operation available for recovery.
