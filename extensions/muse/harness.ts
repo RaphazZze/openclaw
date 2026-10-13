@@ -294,10 +294,6 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
           }
           assertDispatchActive();
         }
-        await options.sessionStore.register(params.sessionId, {
-          sessionId: session.sessionId,
-          compatibility,
-        });
         session.onApproval(createApprovalHandler(params));
         session.onApprovalError((error) => {
           failure = new Error(
@@ -331,6 +327,12 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
           ...(params.thinkLevel
             ? { reasoningEffort: params.thinkLevel === "off" ? "minimal" : params.thinkLevel }
             : {}),
+        });
+        // Publish the binding only once Muse accepted the turn carrying any fresh-session
+        // context; an earlier failure must leave the next attempt to seed a new session.
+        await options.sessionStore.register(params.sessionId, {
+          sessionId: session.sessionId,
+          compatibility,
         });
         if (signal?.aborted) {
           onAbort();
@@ -385,7 +387,12 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
           aborted = true;
         }
       } catch (error) {
-        failure ??= error;
+        if (signal?.aborted && !failure) {
+          // The caller's abort, not a Muse failure, ended this attempt.
+          aborted = true;
+        } else {
+          failure ??= error;
+        }
         if (turn) {
           await stop().catch(() => undefined);
         }

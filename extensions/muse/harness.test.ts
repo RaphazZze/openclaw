@@ -8,6 +8,7 @@ import type {
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { AuthStorage, ModelRegistry, SessionManager } from "openclaw/plugin-sdk/agent-sessions";
 import type * as ExecApprovalsRuntime from "openclaw/plugin-sdk/exec-approvals-runtime";
+import { loadUserTurnTranscriptRecorderFactoryForTest } from "openclaw/plugin-sdk/plugin-test-runtime";
 import type * as ProviderAuthRuntime from "openclaw/plugin-sdk/provider-auth-runtime";
 import type * as TranscriptRuntime from "openclaw/plugin-sdk/session-transcript-runtime";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -362,6 +363,54 @@ describe("Muse native MSP harness", () => {
     }
   });
 
+  it("reseeds context on the next turn when the first turn never reached Muse", async () => {
+    const { harness, params, bindings } = setup();
+    const bootstrapWorkspace = await mkdtemp(join(workspace, "bootstrap-retry-"));
+    await writeFile(join(bootstrapWorkspace, "SOUL.md"), "Speak like a patient astronomer.");
+    const log = join(workspace, `${params.runId}.jsonl`);
+    vi.stubEnv("MUSE_REQUEST_LOG", log);
+    try {
+      // Abort during transcript admission: after the session opened, before Muse got the turn.
+      const controller = new AbortController();
+      const createRecorder = await loadUserTurnTranscriptRecorderFactoryForTest();
+      const recorder = createRecorder({
+        input: { text: params.prompt, idempotencyKey: `${params.runId}:user` },
+        target: {
+          agentId: "main",
+          sessionId: "transcript-id",
+          sessionKey: "agent:main:muse-test",
+          storePath: join(workspace, "sessions.json"),
+          sessionEntry: undefined,
+        },
+      });
+      const aborted = await harness.runAttempt({
+        ...params,
+        workspaceDir: bootstrapWorkspace,
+        abortSignal: controller.signal,
+        userTurnTranscriptRecorder: {
+          ...recorder,
+          persistApproved: async () => {
+            controller.abort();
+            return undefined;
+          },
+        },
+      });
+      expect(terminal(aborted).kind).toBe("aborted");
+      expect(bindings.has(params.sessionId)).toBe(false);
+      await harness.runAttempt({ ...params, workspaceDir: bootstrapWorkspace, prompt: "next" });
+      const turns = (await readFile(log, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((request) => request.method === "turn/start");
+      expect(turns).toHaveLength(1);
+      expect(turns[0].params.input[0].text).toContain("Speak like a patient astronomer.");
+    } finally {
+      await harness.dispose?.();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("fails visibly without dispatching a turn when retained context cannot be read", async () => {
     const { harness, params, bindings } = setup();
     const log = join(workspace, `${params.runId}.jsonl`);
@@ -550,13 +599,6 @@ describe("Muse native MSP harness", () => {
     const firstStarted = new Promise<void>((resolve) => {
       started = resolve;
     });
-    const register = state.sessionStore.register;
-    state.sessionStore.register = async (key, value) => {
-      await register(key, value);
-      if (key === secondId) {
-        secondController.abort();
-      }
-    };
     const first = state.harness.runAttempt({
       ...state.params,
       prompt: "wait",
@@ -565,6 +607,11 @@ describe("Muse native MSP harness", () => {
     });
     try {
       await firstStarted;
+      readHistory.mockImplementationOnce(async () => {
+        // Abort after the shared host and session open, before the turn is dispatched.
+        secondController.abort();
+        return SessionManager.inMemory();
+      });
       const second = await state.harness.runAttempt({
         ...state.params,
         sessionId: secondId,

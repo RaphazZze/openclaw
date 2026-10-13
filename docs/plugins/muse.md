@@ -167,10 +167,11 @@ names the setting.
 
 The plugin stores one binding per OpenClaw session in its plugin state: the
 Muse session id plus a fingerprint of the workspace, model, credential,
-approval mode, and MCP servers. The next turn resumes that Muse session when
-the fingerprint matches. If any of those inputs changed, or the previous
-transcript was marked unsafe to replay, the next turn starts a new Muse
-session.
+read-only posture, and approval mode. The binding is saved only after Muse
+accepts the turn. The next turn resumes that Muse session when the fingerprint
+matches. If any of those inputs changed, or the previous transcript was marked
+unsafe to replay, the next turn starts a new Muse session. Changes to Muse's own
+MCP configuration do not start a new session.
 
 If Muse refuses to resume the stored session, the harness starts a new Muse
 session and logs why. Muse runs nothing when it refuses a resume, and the
