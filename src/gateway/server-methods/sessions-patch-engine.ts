@@ -381,12 +381,7 @@ export async function executeSessionPatchMutations(params: {
                       } = resolveCanonicalGatewaySessionStoreKey({
                         cfg,
                         key: target.key,
-                        target: {
-                          agentId: target.targetAgentId,
-                          storePath: target.storePath,
-                          canonicalKey: target.canonicalKey,
-                          storeKeys: target.initialStoreKeys,
-                        },
+                        target: target.initialTarget,
                         store: workingStore,
                         ...(target.requestedAgentId ? { agentId: target.requestedAgentId } : {}),
                       });
