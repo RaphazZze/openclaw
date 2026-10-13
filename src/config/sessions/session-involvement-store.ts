@@ -3,7 +3,7 @@ import { emitSessionLifecycleEvent } from "../../sessions/session-lifecycle-even
 import { prepareUserProfileCatalog } from "../../state/user-profile-list.js";
 import type { SessionCollaborationScope } from "./session-collaboration-scope.js";
 import {
-  publishSessionCollaborationChange,
+  publishSessionCollaborationChanges,
   runSessionCollaborationWrite,
 } from "./session-sharing-store.async.js";
 import type { SessionInvolvementMutation } from "./session-sharing-store.types.js";
@@ -32,8 +32,8 @@ export async function updateSessionProfileInvolvementAsync(
       { type: "involvement", input: { scope, params: captured, profiles: [] } },
       (result, location, database, currentKeys) => {
         if (result.changed && database && (!currentKeys || currentKeys.has(location.sessionKey))) {
-          publishSessionCollaborationChange(
-            { ...location, facts: { kind: "unchanged" } },
+          publishSessionCollaborationChanges(
+            [{ ...location, facts: { kind: "unchanged" } }],
             database,
           );
           emitSessionLifecycleEvent({

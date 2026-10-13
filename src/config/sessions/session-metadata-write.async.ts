@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { SessionCollaborationScope } from "./session-collaboration-scope.js";
 import type { SessionOwnerAssignment } from "./session-entry-provenance.js";
 import {
-  publishSessionCollaborationChange,
+  publishSessionCollaborationChanges,
   runSessionCollaborationWrite,
 } from "./session-sharing-store.async.js";
 import type {
@@ -31,10 +31,12 @@ export function assignSessionOwnerInWorker(
     { type: "owner.assign", input: { scope, params: capturedParams } },
     (result, location, database, currentKeys) => {
       if (result.value && (!currentKeys || currentKeys.has(location.sessionKey))) {
-        publishSessionCollaborationChange(
-          result.facts
-            ? { ...location, facts: result.facts }
-            : { ...location, factsInvalidated: true },
+        publishSessionCollaborationChanges(
+          [
+            result.facts
+              ? { ...location, facts: result.facts }
+              : { ...location, factsInvalidated: true },
+          ],
           database,
         );
       }
