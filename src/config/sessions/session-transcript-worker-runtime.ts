@@ -168,6 +168,11 @@ export function retainSessionHistoryWorkerDatabase(
           aborters: owned.aborters,
         },
         async (admit, requestLane) => {
+          // Reopened lanes check replacement before lending the next request a receipt.
+          const validation = captureOpenClawAgentDatabaseReadValidation(
+            database,
+            owned.nativeSequences.has(requestLane) ? "retained" : "admission",
+          );
           try {
             const reply = await admit((requestSignal, remaining) => {
               // A writer ahead of this read can renew the receipt during admission.
