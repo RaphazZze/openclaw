@@ -89,7 +89,15 @@ describe("X guest turns", () => {
       expect(turn.ctxPayload.BodyForAgent).toContain("\n> This is from a verified user:");
       expect(turn.ctxPayload.BodyForAgent?.match(/\[triggering mention\]/g)).toHaveLength(1);
       expect(turn.ctxPayload.BodyForAgent?.match(/context \d+/g)).toHaveLength(1);
-      expect(turn.ctxPayload.ConversationToolPolicy).toEqual({
+      expect(turn.ctxPayload.ConversationToolPolicy).toBeUndefined();
+      expect(
+        xPlugin.groups!.resolveToolPolicy!({
+          cfg,
+          senderId: turn.ctxPayload.SenderId,
+          groupId: turn.ctxPayload.ChatId,
+          accountId: turn.ctxPayload.AccountId,
+        }),
+      ).toEqual({
         allow: ["read", "ls", "sessions_spawn", "sessions_yield", "subagents"],
         deny: ["skills_read"],
       });
@@ -145,9 +153,15 @@ describe("X guest turns", () => {
       await done.promise;
       expect(test.dispatch).toHaveBeenCalledOnce();
       const turn = test.dispatch.mock.calls[0]![0];
-      expect(turn.ctxPayload.ConversationToolPolicy).toEqual(
-        helperOnly ? { deny: ["*"] } : { allow: ["read", "ls"], deny: ["skills_read"] },
-      );
+      expect(turn.ctxPayload.ConversationToolPolicy).toBeUndefined();
+      expect(
+        xPlugin.groups!.resolveToolPolicy!({
+          cfg,
+          senderId: turn.ctxPayload.SenderId,
+          groupId: turn.ctxPayload.ChatId,
+          accountId: turn.ctxPayload.AccountId,
+        }),
+      ).toEqual(helperOnly ? { deny: ["*"] } : { allow: ["read", "ls"], deny: ["skills_read"] });
       expect(turn.ctxPayload.BodyForAgent).toContain("this host supports read-only guest answers");
       expect(turn.ctxPayload.BodyForAgent).not.toContain("hidden helpers must use");
       expect(running.status()).toMatchObject({

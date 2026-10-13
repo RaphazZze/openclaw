@@ -11,11 +11,7 @@ import { openXAllowlist, XAllowlistChangedError } from "./allowlist.js";
 import { parseXPostEnvelope, type XPostEnvelope } from "./api.js";
 import { getXApi, getXTokenState } from "./client.js";
 import { runXEvents, waitForXBudgetReset, type XCursorState, type XEventStatus } from "./events.js";
-import {
-  formatXSenderLine,
-  resolveXGuestSettings,
-  resolveXGuestToolPolicy,
-} from "./guest-policy.js";
+import { formatXSenderLine, resolveXGuestSettings } from "./guest-policy.js";
 import { openXGuestUsage, XGuestUsageUnavailableError } from "./guest-usage.js";
 import { getXGuestStatus, resolveXGuestContainmentError } from "./guests.js";
 import { resolveXIngress, xMentionFacts } from "./ingress.js";
@@ -317,9 +313,6 @@ export async function startXAccount(ctx: ChannelGatewayContext<ResolvedXAccount>
         channelIngress,
         access: {
           mentions: { ...xMentionFacts, requireMention: true, explicitlyMentionedBot: true },
-          ...(guest
-            ? { toolPolicy: resolveXGuestToolPolicy(resolveXAccount(cfg, account.accountId)) }
-            : {}),
         },
         channel: "x",
         accountId: account.accountId,

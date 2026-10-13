@@ -30,12 +30,12 @@ describe("pending Stop producer binding", () => {
     async (target) => {
       await withOpenClawTestState({ scenario: "minimal" }, async () => {
         ensureUserProfileRoleSchema({});
-        using _ = { [Symbol.dispose]: (await prepareUserProfileCatalog()).release };
         const client = roleClient("view", "pending-agent-owner");
         client.connId = "pending-owner";
         client.connect.scopes = ["operator.sessions.write"];
         const cfg = rolePolicyConfig();
         setRuntimeConfigSnapshot(cfg);
+        using _ = { [Symbol.dispose]: (await prepareUserProfileCatalog()).release };
         const context = createDirectChatContext({ getRuntimeConfig: () => cfg });
         const entry = {
           sessionId: "original",
@@ -117,12 +117,12 @@ describe("pending Stop producer binding", () => {
   it("keeps a real chat admission abortable while its original session lifecycle is held", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       ensureUserProfileRoleSchema({});
-      using _ = { [Symbol.dispose]: (await prepareUserProfileCatalog()).release };
       const client = roleClient("view", "pending-chat-owner");
       client.connId = "pending-owner";
       client.connect.scopes = ["operator.sessions.write"];
       const cfg = rolePolicyConfig();
       setRuntimeConfigSnapshot(cfg);
+      using _ = { [Symbol.dispose]: (await prepareUserProfileCatalog()).release };
       const context = createDirectChatContext({ getRuntimeConfig: () => cfg });
       await upsertSessionEntryCore(
         { agentId: "main", sessionKey: key },

@@ -687,6 +687,7 @@ describe("ordinary chat input admission", () => {
         await fixture.finishDispatch();
         await patchSessionEntryCore(fixture.scope, () => ({ status: "done" }));
         const legacyMessage = structuredClone(message);
+        delete legacyMessage["__openclaw"]?.requesterOrigin;
         if (!recordedClient) {
           // Shipped Gateway receipts predate transport.clients. Seed only after
           // collection, whose live owner still requires its exact accepted bytes.

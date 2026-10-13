@@ -1,3 +1,4 @@
+import type { RequesterOrigin } from "../agents/requester-origin.js";
 import type { SessionPendingInputReceipt } from "../config/sessions/session-pending-input-receipt.types.js";
 import type { SessionReactionWrite } from "../config/sessions/session-reaction-store.types.js";
 import type {
@@ -22,6 +23,7 @@ export type UserTurnPromptReactionSource = Readonly<{
 }>;
 
 type AdmissionOwner = {
+  requesterOrigin: () => RequesterOrigin | undefined;
   promptReactionSource?: UserTurnPromptReactionSource;
   pendingInput: () => SessionPendingInputReceipt | undefined;
   withdrawnInputId: () => string | undefined;
@@ -49,6 +51,12 @@ export function getUserTurnTranscriptAdmissionOwner(
   recorder: UserTurnTranscriptRecorder,
 ): AdmissionOwner | undefined {
   return admissionOwners.get(recorder);
+}
+
+/** Preserve prepared producer facts; accepted input takes precedence after durable custody. */
+export function readUserTurnRequesterOrigin(recorder: UserTurnTranscriptRecorder | undefined) {
+  const owner = recorder && admissionOwners.get(recorder);
+  return owner?.requesterOrigin();
 }
 
 export function bindUserTurnPromptReactionSource(
