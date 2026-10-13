@@ -39,7 +39,6 @@ import {
   type SqliteWorkerRequest,
 } from "./sqlite-worker-contract.js";
 import {
-  createSqliteWorkerOperationAdmission,
   readSqliteWorkerExecutionAuthority,
   readSqliteWorkerMaintenanceAuthority,
 } from "./sqlite-worker-operation-admission.js";
@@ -148,22 +147,12 @@ function prepareSqliteWorkerOperationAdmission(
   assertDispatchable: () => void,
   assertCurrentJob: () => void,
 ) {
-  if (!job.createAdmission && !databasePath) {
+  if (!job.createAdmission) {
     return undefined;
   }
   const settlement = createDeferredCore<SqliteWorkerOperationSettlement>();
   job.settleNative = settlement.resolve;
-  const retained = job.createAdmission
-    ? job.createAdmission({ settled: settlement.promise })
-    : {
-        admission: createSqliteWorkerOperationAdmission(() => {
-          throw new SqliteWorkerError(
-            "SQLite domain operation requires its own admission",
-            "closed",
-          );
-        }),
-        nativeLocations: databasePath ? [databasePath] : [],
-      };
+  const retained = job.createAdmission({ settled: settlement.promise });
   try {
     if (databasePath) {
       const assertCreate = (location: string) => {
