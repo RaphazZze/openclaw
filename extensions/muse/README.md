@@ -15,8 +15,8 @@ or `muse login`.
 The harness is opt-in only: set `agentRuntime.id: "muse"` on a `meta/*` model
 or on the `meta` provider; `auto` never picks it.
 
-See [Muse Code agent runtime](../../docs/plugins/muse.md) for auth, approvals,
-sessions, limitations, and live tests.
+See [Muse Code agent runtime](https://docs.openclaw.ai/plugins/muse) for auth,
+approvals, sessions, limitations, and live tests.
 
 ## Package
 
