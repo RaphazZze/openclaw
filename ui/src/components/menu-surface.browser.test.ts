@@ -9,6 +9,7 @@ import "../pages/chat/components/browser-tab-card.tsx";
 import { renderChatComposerPlusMenu } from "../pages/chat/components/chat-composer-plus-menu.tsx";
 import "../test-helpers/load-styles.ts";
 import "./menu-surface.ts";
+import { Menu } from "./solid/menu.tsx";
 import "./resizable-divider.ts";
 import "./web-awesome.ts";
 
@@ -141,11 +142,11 @@ async function pauseMenuOpening(dropdown: Dropdown, trigger: HTMLElement) {
 
 async function browserCardMenu(card: HTMLElementTagNameMap["openclaw-browser-tab-card"]) {
   await card.updateComplete;
-  const dropdown = card.querySelector("wa-dropdown");
-  if (!dropdown) {
+  const menu = card.querySelector<HTMLElement>(".oc-menu");
+  if (!menu) {
     throw new Error("expected browser card menu");
   }
-  return dropdown;
+  return menu;
 }
 
 describe.skipIf(!hasPopoverApi)("sidebar menu stacking", () => {
@@ -405,7 +406,7 @@ describe.skipIf(!hasPopoverApi)("platform menu hover", () => {
   );
 
   it.each(["dark", "light"] as const)(
-    "matches session menu geometry and theme inside browser-card shadow roots in %s mode",
+    "matches session menu geometry and theme inside browser cards in %s mode",
     async (theme) => {
       await useDesktopViewport();
       const highlight = useTheme(theme);
@@ -419,19 +420,23 @@ describe.skipIf(!hasPopoverApi)("platform menu hover", () => {
         title: "Example page",
       };
       document.body.append(card);
-      const dropdown = await browserCardMenu(card);
+      const menu = await browserCardMenu(card);
       const { page } = await import("vitest/browser");
-      await page.elementLocator(card.querySelector<HTMLElement>('[slot="trigger"]')!).click();
+      await page.elementLocator(card.querySelector<HTMLElement>(".more")!).click();
       const item = card.querySelector<HTMLElement>('[value="copy-url"]')!;
-      const reference = document.createElement("wa-dropdown");
-      reference.className = "session-menu";
-      const referenceItem = document.createElement("wa-dropdown-item");
-      referenceItem.className = "session-menu__item";
-      referenceItem.textContent = "Reference action";
-      reference.append(referenceItem);
+      const reference = document.createElement("div");
       document.body.append(reference);
-      const menu = await settledMenuSurface(dropdown);
-      const referenceMenu = await settledMenuSurface(reference);
+      render(
+        solidTemplate(Menu, {
+          id: "browser-card-reference",
+          label: "Reference menu",
+          class: "session-menu",
+          items: [{ id: "reference", label: "Reference action", class: "session-menu__item" }],
+        }),
+        reference,
+      );
+      const referenceMenu = reference.querySelector<HTMLElement>(".oc-menu")!;
+      const referenceItem = reference.querySelector<HTMLElement>('[data-value="reference"]')!;
       for (const property of ["background-color", "border-radius", "padding", "box-shadow"]) {
         expect(getComputedStyle(menu).getPropertyValue(property)).toBe(
           getComputedStyle(referenceMenu).getPropertyValue(property),

@@ -125,10 +125,10 @@ async function mountBrowserCard() {
   await card.updateComplete;
   return {
     card,
-    copy: () =>
-      card
-        .querySelector("wa-dropdown")
-        ?.dispatchEvent(new CustomEvent("wa-select", { detail: { item: { value: "copy-url" } } })),
+    copy: () => {
+      card.querySelector<HTMLButtonElement>(".more")!.click();
+      card.querySelector<HTMLButtonElement>('[data-value="copy-url"]')!.click();
+    },
   };
 }
 
