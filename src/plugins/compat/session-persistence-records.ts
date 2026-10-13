@@ -417,7 +417,7 @@ export const SESSION_PERSISTENCE_COMPAT_RECORDS = [
   {
     code: "session-manager-sync-persistence",
     ...DEPRECATED_SESSION_COMPAT,
-    removalGate: "later-stable-release",
+    removalGate: "stable-deprecation-period",
     introduced: "2026-10-01",
     deprecated: "2026-10-01",
     warningStarts: "2026-10-01",
