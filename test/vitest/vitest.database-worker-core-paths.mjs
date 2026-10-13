@@ -836,6 +836,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/meeting-bot/session-runtime.test.ts",
   "src/meeting-bot/transcripts-bridge.provenance.test.ts",
   "src/meeting-bot/transcripts-bridge.test.ts",
+  "src/transcripts/auto-start-retry.test.ts",
   "src/transcripts/capture-stop.test.ts",
   "src/transcripts/capture-append-drain.test.ts",
   "src/transcripts/library.query-budget.test.ts",

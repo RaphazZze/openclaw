@@ -140,32 +140,19 @@ function SidebarAgentRosterContent(
     },
   );
   createEffect(roster.store, (store) => () => store.setInvolvingMe(false));
+  // Roster publications invalidate the parent, which reads the live store directly.
   createEffect(
     () => ({ snapshot: roster.snapshot(), collapsed: collapsed() }),
-    ({ snapshot, collapsed: collapsedIds }) => {
+    ({ collapsed: collapsedIds }) => {
       const host = props.host;
-      const source = host.rosterSessionSource;
-      const agentIds = snapshot.cards.map((card) => card.id);
-      if (
-        !source ||
-        source.result !== snapshot.result ||
-        source.collapsedAgentIds !== collapsedIds ||
-        source.agentIds.length !== agentIds.length ||
-        source.agentIds.some((id, index) => id !== agentIds[index])
-      ) {
-        host.rosterSessionSource = {
-          result: snapshot.result,
-          agentIds,
-          collapsedAgentIds: collapsedIds,
-        };
-        host.sessionData.requestSessionDataUpdate();
-      }
+      host.rosterCollapsedAgentIds = collapsedIds;
+      host.sessionData.requestSessionDataUpdate();
     },
   );
   createEffect(
     () => props.host,
     (host) => () => {
-      host.rosterSessionSource = null;
+      host.rosterCollapsedAgentIds = null;
       host.requestUpdate();
     },
   );

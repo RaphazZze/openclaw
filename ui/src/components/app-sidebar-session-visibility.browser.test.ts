@@ -114,6 +114,14 @@ it("pauses offscreen session indicators and resumes them when their rows scroll 
       sidebar.querySelector<HTMLButtonElement>(".sidebar-session-pagination__button")!.click();
       await settleRoster(sidebar);
     }
+    await waitForSolid(() => {
+      const runningRows = [...sidebar.querySelectorAll<HTMLElement>(".session-row-host")].filter(
+        (row) => row.querySelector(".session-glyph__ring, .session-glyph__trace-run"),
+      );
+      // Solid retains observed rows, so existing entries also satisfy readiness.
+      expect(runningRows).toHaveLength(11);
+      expect(runningRows.every((row) => intersections.has(row))).toBe(true);
+    });
   };
   await revealRunningRows();
   expect(observers).toHaveLength(1);
