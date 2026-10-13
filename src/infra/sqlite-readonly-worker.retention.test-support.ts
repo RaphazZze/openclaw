@@ -137,7 +137,7 @@ try {
   const paused = createDeferredCore<() => boolean>();
   const originalEmit = worker.emit.bind(worker);
   let pause = true;
-  worker.emit = function (event, ...args) {
+  worker.emit = function (event: string | symbol, ...args: unknown[]) {
     const message: unknown = args[0];
     if (
       event === "message" &&
