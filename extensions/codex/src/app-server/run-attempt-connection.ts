@@ -228,13 +228,12 @@ export async function prepareCodexAttemptConnection({ params, options }: CodexRu
     !activeContextEngine && binding?.contextEngine?.projection?.mode === "thread_bootstrap";
   let generationAuthority: RetainedNativeSessionGenerationAuthority | undefined;
   let generationAuthorityTransferred = false;
-  using _generationAuthority = {
-    [Symbol.dispose]: () => {
-      if (!generationAuthorityTransferred) {
-        generationAuthority?.release();
-      }
-    },
-  };
+  using captures = new DisposableStack();
+  captures.defer(() => {
+    if (!generationAuthorityTransferred) {
+      generationAuthority?.release();
+    }
+  });
   // Only a durable session row authorizes stable-key ownership. Caller-owned
   // transcripts omit a store target, so classify them against the default store too.
   if (bindingIdentity.kind === "session" && bindingIdentity.sessionKey) {
@@ -290,13 +289,11 @@ export async function prepareCodexAttemptConnection({ params, options }: CodexRu
       : undefined,
   });
   let bindingAuthorityTransferred = false;
-  using _bindingAuthority = {
-    [Symbol.dispose]: () => {
-      if (!bindingAuthorityTransferred) {
-        releaseBindingAuthority();
-      }
-    },
-  };
+  captures.defer(() => {
+    if (!bindingAuthorityTransferred) {
+      releaseBindingAuthority();
+    }
+  });
   const assertCurrent = () => {
     bindingAuthority.assertCurrent();
     assertModelExecutionCurrent();

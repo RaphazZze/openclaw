@@ -158,7 +158,7 @@ export async function maybeCompactCodexAppServerSession(
       const threadId = (await options.bindingStore.readAsync(bindingIdentity))?.threadId;
       return abortedResult(params, threadId, threadId);
     }
-    using _bindingAuthority = { [Symbol.dispose]: resolvedBinding.release };
+    using _ = { [Symbol.dispose]: resolvedBinding.release };
     const { binding: initialBinding, authority } = resolvedBinding;
     const assertCurrent = () => {
       authority.assertCurrent();

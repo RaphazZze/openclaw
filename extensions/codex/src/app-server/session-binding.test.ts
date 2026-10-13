@@ -731,7 +731,7 @@ describe("Codex app-server binding store", () => {
           identity: current,
           storePath,
         });
-        using _bindingAuthority = { [Symbol.dispose]: resolved.release };
+        using _ = { [Symbol.dispose]: resolved.release };
         expect(resolved.binding).toBeUndefined();
         expect(store.read(previous)).toEqual(binding);
         await expect(

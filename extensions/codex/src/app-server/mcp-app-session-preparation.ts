@@ -65,7 +65,7 @@ export async function prepareCodexMcpAppSession(params: {
       signal: input.abortSignal,
       assertCurrent: assertSourceCurrent,
     });
-    using _bindingAuthority = { [Symbol.dispose]: admitted.release };
+    using _ = { [Symbol.dispose]: admitted.release };
     const assertCurrent = () => {
       assertSourceCurrent();
       admitted.authority.assertLegacyCurrent();

@@ -40,7 +40,7 @@ export async function withCodexPluginCommandContext<T>(
   const ctx = { ...params.ctx, gatewayClientScopes: params.ctx.gatewayClientScopes?.slice() };
   const current = (await deps.codexPluginsManagementIo?.readConfig()) ?? {};
   const { scope, binding } = await resolveCommandAppServerContext(deps, ctx, pluginConfig);
-  using _scope = { [Symbol.dispose]: scope.release };
+  using _ = { [Symbol.dispose]: scope.release };
   const conversation = readCodexConversationBindingData(await ctx.getCurrentConversationBinding());
   const workspaceDir =
     binding?.cwd ||

@@ -293,7 +293,7 @@ export async function buildThreads(
   filter: string,
 ): Promise<string> {
   const scope = await resolveCommandAppServerScope(deps, ctx, pluginConfig);
-  using _scope = { [Symbol.dispose]: scope.release };
+  using _ = { [Symbol.dispose]: scope.release };
   const response = await deps.codexControlRequest(
     pluginConfig,
     CODEX_CONTROL_METHODS.listThreads,
@@ -362,7 +362,7 @@ export async function resumeThread(
     config: ctx.config,
     storePath: ctx.sessionTarget?.storePath,
   });
-  using _bindingAuthority = { [Symbol.dispose]: release };
+  using _ = { [Symbol.dispose]: release };
   const assertHostGeneration = authority.assertLegacyCurrent;
   return await withExclusiveCodexAppServerThread({
     bindingStore: deps.bindingStore,

@@ -439,7 +439,7 @@ describe("Codex finalization generation ownership", () => {
         identity: successor,
         storePath: scope.storePath,
       });
-      using _adopted = { [Symbol.dispose]: adopted.release };
+      using _ = { [Symbol.dispose]: adopted.release };
       expect(adopted.binding).toEqual(admittedBinding);
       harness.close();
 

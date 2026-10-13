@@ -189,7 +189,7 @@ export function createAgentsApiHarness(runtime: PluginRuntime): AgentHarnessV2 {
             `Agents API session generation is no longer current: ${sessionId}`,
           ),
       });
-      using _lineage = { [Symbol.dispose]: captured.release };
+      using _ = { [Symbol.dispose]: captured.release };
       const authority = captured.authority;
       authority.assertLegacyCurrent();
       runningSessions.set(params.sessionId, (runningSessions.get(params.sessionId) ?? 0) + 1);

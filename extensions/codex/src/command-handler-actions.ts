@@ -243,7 +243,7 @@ export async function handleNativeGoal(
   const action = (args[0] ?? "status").toLowerCase();
   const objective = args.slice(1).join(" ").trim();
   const authority = await resolvePreparedCodexCommandAuthority(deps, ctx);
-  using _authority = { [Symbol.dispose]: authority.release };
+  using _ = { [Symbol.dispose]: authority.release };
   const { target, binding } = authority;
   if (!target) {
     return "Cannot manage the Codex goal because this command has no stable binding identity.";
@@ -355,7 +355,7 @@ export async function controlConversationTurn(
   message: string,
 ): Promise<string> {
   const authority = await resolvePreparedCodexCommandAuthority(deps, ctx);
-  using _authority = { [Symbol.dispose]: authority.release };
+  using _ = { [Symbol.dispose]: authority.release };
   const { target, binding } = authority;
   if (!target) {
     return `Cannot ${command} Codex because this command did not include a stable binding identity.`;
@@ -387,7 +387,7 @@ export async function setConversationModel(
     return MODEL_SELECTION_LOCKED_MESSAGE;
   }
   const authority = await resolvePreparedCodexCommandAuthority(deps, ctx);
-  using _authority = { [Symbol.dispose]: authority.release };
+  using _ = { [Symbol.dispose]: authority.release };
   const { target, binding } = authority;
   if (!target) {
     return "Cannot set Codex model because this command did not include a stable binding identity.";
@@ -443,7 +443,7 @@ export async function setConversationPreference(
     return usage;
   }
   const authority = await resolvePreparedCodexCommandAuthority(deps, ctx);
-  using _authority = { [Symbol.dispose]: authority.release };
+  using _ = { [Symbol.dispose]: authority.release };
   const { target, binding } = authority;
   if (kind === "fast") {
     if (!target) {
@@ -511,7 +511,7 @@ export async function startThreadAction(
     return `Usage: /codex ${kind}`;
   }
   const authority = await resolvePreparedCodexCommandAuthority(deps, ctx);
-  using _authority = { [Symbol.dispose]: authority.release };
+  using _ = { [Symbol.dispose]: authority.release };
   const { target, binding } = authority;
   if (!target) {
     return `Cannot start Codex ${kind === "compact" ? "compaction" : "review"} because this command did not include a stable binding identity.`;

@@ -81,7 +81,7 @@ export async function withCodexThreadLifecycleBinding(
           assertCodexSessionRuntimeOwnership(binding, params.params.expectedSessionRuntimeOwnership)
       : undefined,
   });
-  using _bindingAuthority = { [Symbol.dispose]: release };
+  using _ = { [Symbol.dispose]: release };
   const assertCurrent = authority.assertCurrent;
   const runWithLease = () =>
     params.bindingStore.withLease(

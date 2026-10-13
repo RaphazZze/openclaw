@@ -167,7 +167,7 @@ export async function runCodexAppServerSideQuestion(
     assertCurrent: hostCapabilities.assertActive,
     signal: params.opts?.abortSignal,
   });
-  using _bindingAuthority = { [Symbol.dispose]: release };
+  using _ = { [Symbol.dispose]: release };
   const assertCurrent = authority.assertCurrent;
   if (!binding?.threadId) {
     throw new Error(
