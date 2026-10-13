@@ -12,6 +12,10 @@ sidebarTitle: "Chat"
 
 How the chat pane behaves: the session rail, the composer, and how the transcript renders.
 
+When the latest history page has no visible messages, for example because tool
+activity is hidden, the pane loads earlier history automatically. An incomplete
+history page does not show the new-chat welcome screen.
+
 Enable **Settings → Labs → Speech bubbles** to try the experimental view (off by default).
 While enabled, Home uses bubbles by default. The session menu’s **View → Speech bubbles**
 option changes only that conversation. Explicit choices stay in this browser for this
@@ -23,6 +27,11 @@ rows expand to show the usual tool cards and output. Animated dots mark the curr
 working state, not completed work. Startup, approval, question, and subagent-wait
 controls keep their distinct presentation. Text appears as it arrives, including
 short fragments before a tool call or the final response.
+
+If an inactive run's saved history ends during tool use and has no terminal
+assistant message, Chat keeps its commentary and tool activity visible and marks
+the run **Interrupted**. This presentation does not resume the run or recover an
+answer that was never saved.
 
 Tool activity shows a tool-specific icon beside its purpose or details instead of
 repeating the tool name. When no distinct purpose or detail is available, the row
@@ -452,6 +461,7 @@ Run-error banners offer **Refresh** to reload the conversation without resending
     - `chat.history` responses are size-bounded for UI safety. When transcript entries are too large, Gateway may truncate long text fields, omit heavy metadata blocks, and replace oversized messages with a placeholder (`[chat.history omitted: message too large]`).
     - Long tool output uses 2,000-character text previews in history. Complete structured results keep their existing display limit so source cards and embedded views remain available. Choose **Show full output** to load the captured result on demand; copying or downloading from that view uses the full result. User and assistant text keep their separate display limits.
     - When a visible assistant message was truncated in `chat.history`, the Control UI automatically fetches the full display-normalized transcript entry through `chat.message.get` by `sessionKey`, active `agentId` when needed, and transcript `messageId`. The preview remains visible while the entry loads; recovered text replaces it inline.
+    - Image previews reserve their space while loading. New uploaded images retain their pixel dimensions in saved messages; older images without dimensions fit inside a stable 3:2 preview instead of shifting the surrounding conversation when they load. Open an image to view its full size.
     - Assistant/generated images are persisted as managed media references. New clients resolve their stable artifact ids through authenticated `artifacts.download` and receive short-lived, exact-resource media URLs, so reloads do not depend on raw base64 payloads or reusable credentials in image URLs. The chat uses bounded thumbnails and provides Open, Download, and Copy actions for the full image. These actions share the browser's bounded in-memory image cache, avoiding repeated full-image downloads while the image remains cached.
     - When rendering `chat.history`, the Control UI strips display-only inline directive tags from visible assistant text (for example `[[reply_to_*]]` and `[[audio_as_voice]]`), plain-text tool-call XML payloads (including `<tool_call>...</tool_call>`, `<function_call>...</function_call>`, `<tool_calls>...</tool_calls>`, `<function_calls>...</function_calls>`, and truncated tool-call blocks), and leaked ASCII/full-width model control tokens. It omits assistant entries whose whole visible text is only the exact silent token `NO_REPLY` / `no_reply` or the heartbeat acknowledgement token `HEARTBEAT_OK`.
     - During an active send and the final history refresh, the chat view keeps local optimistic user/assistant messages visible if `chat.history` briefly returns an older snapshot; the canonical transcript replaces those local messages once the Gateway history catches up. Pending sends in shared sessions remain a single bubble while incremental history catches up, even when another participant's reply arrives first. Saved commentary also replaces its matching live item when incremental history arrives after completion, cancellation, or failure, keeping the progress text in its original place.
@@ -810,8 +820,17 @@ HTML widget media keep their existing behavior.
 
 ## Session Details
 
-Select **Details** at the top-right of the conversation to open the session’s compact information surface.
-It opens only on request, not when progress or background activity updates.
+**Details** brings session context and task progress together beside the conversation.
+On wide chat panes it opens automatically as a docked right-hand column, with
+the transcript and composer centered in the remaining space. Docking uses the
+space left after navigation, split panes, and other panels—not the window width
+alone. The column scrolls independently and never covers the conversation.
+
+When the pane becomes too narrow, automatically opened Details collapses. Select
+**Details** to open it as an overlay on narrower screens. Closing it explicitly
+keeps it closed while that conversation remains open, including through progress
+updates, resizing, and temporarily hiding its pane. Selecting **Details** reopens it.
+
 **Session details** and **Task progress** have independent disclosure states.
 Session context groups workspace information, pull requests, people, subagents,
 and attached automations; it reuses their existing actions rather than duplicating
@@ -847,8 +866,8 @@ Task progress cards are enabled by default. Toggle **Show task progress cards** 
 Hiding it does not stop agent work or clear saved progress.
 
 Opening Details does not couple the two sections’ disclosure states. Sending
-messages, run completion, and progress updates do not automatically open Details
-or reopen a card the user collapsed. See
+messages, run completion, and progress updates do not reopen Details after it is
+explicitly closed or reopen a card the user collapsed. See
 [Task progress cards](/tools/progress-card#where-the-card-appears) for card-lifetime
 and preference behavior.
 

@@ -1,6 +1,6 @@
 import type { WaSelectEvent } from "@awesome.me/webawesome/dist/events/select.js";
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from "solid-js";
-import { isSessionRouteId, pathForRoute } from "../app-route-paths.ts";
+import { isSessionRouteId } from "../app-route-paths.ts";
 import { loadSettings, patchSettings } from "../app/settings.ts";
 import { registerAgentsHomeEnglish } from "../i18n/locales/en-agents-home.ts";
 import { rosterActivityStore } from "../lib/agents/roster-activity-store.ts";
@@ -14,7 +14,6 @@ import { projectSource } from "../lib/reactive/projection.ts";
 import { sessionNavigationTarget } from "../lib/sessions/route-navigation.ts";
 import { areUiSessionKeysEquivalent } from "../lib/sessions/session-key.ts";
 import { defineSolidBridge } from "../lit/solid-bridge.ts";
-import { newSessionSearch } from "../pages/new-session/location.ts";
 import type { AppSidebarRenderHost } from "./app-sidebar-render.tsx";
 import { renderPersonalSessionEmpty } from "./app-sidebar-session-filter-summary.tsx";
 import {
@@ -420,85 +419,6 @@ function SidebarAgentRosterContent(
   );
 }
 
-function SidebarNewSessionMenuContent(
-  props: RosterProps & { access: ReturnType<RosterHost["readNewSessionAccess"]> },
-) {
-  const roster = useRoster(props);
-  const access = () => props.access;
-  const [opened, setOpened] = createSignal(false);
-  let dropdown!: HTMLElement & { open: boolean };
-  return (
-    <>
-      <wa-dropdown
-        ref={(element) => {
-          dropdown = element;
-        }}
-        class="sidebar-new-session-menu"
-        placement="bottom-end"
-        aria-label={t("agentChip.agents")}
-        onWa-show={() => {
-          roster.host().dismissTransientMenus();
-          setOpened(true);
-        }}
-        onWa-select={(event: WaSelectEvent) => {
-          const item = event.detail.item;
-          event.preventDefault();
-          if (item.hasAttribute("data-native-navigation")) {
-            item.removeAttribute("data-native-navigation");
-            return;
-          }
-          const id = item.getAttribute("value");
-          if (access().allowed && id && roster.cards().some((card) => card.id === id)) {
-            dropdown.open = false;
-            roster.host().requestOpenNewSession(id);
-          }
-        }}
-      >
-        <button
-          slot="trigger"
-          type="button"
-          class="sidebar-session-toolbar__button sidebar-new-session"
-          aria-label={t("agentChip.newConversation")}
-          title={props.access.allowed ? t("agentChip.newConversation") : props.access.reason}
-          disabled={!access().allowed || roster.cards().length === 0}
-        >
-          <Icon name="plus" />
-        </button>
-        <Show when={opened()}>
-          <For each={roster.cards()} keyed={(card) => card.id}>
-            {(card) => (
-              <wa-dropdown-item
-                value={card().id}
-                ref={(item) => {
-                  // Run before Web Awesome synchronously emits its selection event.
-                  item.addEventListener("click", (event) => {
-                    if (shouldHandleNavigationClick(event)) {
-                      event.preventDefault();
-                    } else {
-                      item.setAttribute("data-native-navigation", "");
-                    }
-                  });
-                }}
-              >
-                <a
-                  class="sidebar-agent-roster__link"
-                  href={`${pathForRoute("new-session", roster.host().basePath)}${newSessionSearch(card().id)}`}
-                  tabindex={-1}
-                >
-                  <span class="sidebar-agent-roster__avatar" aria-hidden="true">
-                    <AgentIdentityAvatar agent={card()} />
-                  </span>
-                  <span>{card().name}</span>
-                </a>
-              </wa-dropdown-item>
-            )}
-          </For>
-        </Show>
-      </wa-dropdown>
-    </>
-  );
-}
-
 type RosterBridgeProps = { host: RosterHost | null; active: boolean };
 type AgentRosterBridgeProps = RosterBridgeProps & {
   sections: SidebarVisibleSections["sections"];
@@ -528,30 +448,6 @@ export const SidebarAgentRoster = defineSolidBridge<AgentRosterBridgeProps>(
       sections: { default: [], attribute: false },
       involvingMe: { default: false, attribute: false },
       empty: { default: false, type: Boolean },
-    },
-  },
-);
-
-export const SidebarNewSessionMenu = defineSolidBridge<
-  RosterBridgeProps & { access: ReturnType<RosterHost["readNewSessionAccess"]> | null }
->(
-  "openclaw-sidebar-new-session-menu",
-  (props) => (
-    <Show when={props.host}>
-      {(host) => (
-        <Show when={props.access}>
-          {(access) => (
-            <SidebarNewSessionMenuContent host={host()} active={props.active} access={access()} />
-          )}
-        </Show>
-      )}
-    </Show>
-  ),
-  {
-    properties: {
-      host: { default: null, attribute: false },
-      active: { default: true, type: Boolean },
-      access: { default: null, attribute: false },
     },
   },
 );

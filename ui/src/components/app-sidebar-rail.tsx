@@ -34,6 +34,7 @@ import { personActivityLink, personActivityRouting } from "./person-activity-lin
 import { SessionIconGraphic } from "./session-icon-glyph-solid.tsx";
 import { restoreSnapshotSession } from "./sidebar-snapshot-model.ts";
 import { Icon } from "./solid/icon.tsx";
+import { renderNewSessionLink } from "./solid/new-session-link.tsx";
 import {
   SessionGlyph,
   renderSessionUnreadBadge,
@@ -49,7 +50,11 @@ type RailPinTouchPress = {
   opened: boolean;
 };
 
-export function renderSidebarRail(host: AppSidebarRenderHost): JSX.Element {
+export function renderSidebarRail(
+  host: AppSidebarRenderHost,
+  TeamNewSession?: () => JSX.Element,
+): JSX.Element {
+  const newSessionAccess = createMemo(() => host.readNewSessionAccess());
   const zone = () => host.reconciledSidebarZone();
   const pins = createMemo(() =>
     (normalizeSidebarEntries(host.sidebarSnapshot?.entries ?? host.sidebarEntries) ?? []).map(
@@ -70,6 +75,31 @@ export function renderSidebarRail(host: AppSidebarRenderHost): JSX.Element {
       onMouseDown={beginNativeWindowDragFromTopInset}
     >
       {renderSidebarAgentCard(host)}
+      <div class="sidebar-rail__create">
+        <Show
+          when={host.sidebarAgentsMode === "roster"}
+          fallback={renderNewSessionLink({
+            get basePath() {
+              return host.basePath;
+            },
+            get agentId() {
+              return host.expandedAgentId();
+            },
+            className: "sidebar-rail__button sidebar-new-session",
+            get label() {
+              return t("agentChip.newConversation");
+            },
+            showShortcut: true,
+            get disabledReason() {
+              const access = newSessionAccess();
+              return access.allowed ? undefined : access.reason;
+            },
+            onOpen: (agentId, target) => host.requestOpenNewSession(agentId, target),
+          })}
+        >
+          {TeamNewSession ? <TeamNewSession /> : undefined}
+        </Show>
+      </div>
       <div class="sidebar-rail__views">
         <For each={views}>
           {(view) => (

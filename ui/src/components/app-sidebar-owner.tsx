@@ -55,11 +55,7 @@ import {
   isCommunityInviteEligible,
 } from "./community-invite-state.ts";
 import { SessionOrganizerController } from "./session-organizer-controller.ts";
-import {
-  SidebarAgentRoster,
-  SidebarNewSessionMenu,
-  renderSidebarPinnedSession,
-} from "./sidebar-agent-roster.tsx";
+import { SidebarAgentRoster, renderSidebarPinnedSession } from "./sidebar-agent-roster.tsx";
 import { SidebarContextController } from "./sidebar-context-controller.ts";
 import { SidebarMenusController } from "./sidebar-menus-controller.tsx";
 import { SidebarPeopleController } from "./sidebar-people-controller.ts";
@@ -70,6 +66,7 @@ import {
 import { SidebarSnapshotController } from "./sidebar-snapshot-controller.ts";
 import type { SidebarSnapshotModel } from "./sidebar-snapshot-model.ts";
 import { Icon } from "./solid/icon.tsx";
+import { NewSessionMenu } from "./solid/new-session-link.tsx";
 import { PanelRefreshStatus } from "./solid/panel-refresh-status.tsx";
 import { SidebarCommunityInvite } from "./solid/sidebar-community-invite.tsx";
 
@@ -620,18 +617,18 @@ export class AppSidebarOwner extends AppSidebarSessionNavigationElement implemen
 
   renderSidebar(Sessions: () => JSX.Element): JSX.Element {
     const SidebarFrame = () => {
-      const rail = renderSidebarRail(this);
+      const rail = renderSidebarRail(this, () => (
+        <NewSessionMenu
+          basePath={this.basePath}
+          active={this.navigationVisible}
+          access={this.readNewSessionAccess()}
+          snapshotCards={this.sidebarSnapshot?.cards}
+          onShow={() => this.dismissTransientMenus()}
+          onOpen={(agentId) => this.requestOpenNewSession(agentId)}
+        />
+      ));
       const pages = renderSidebarPages(this);
-      const toolbar = renderSessionListToolbar(
-        this,
-        <Show when={this.sidebarAgentsMode === "roster"}>
-          <SidebarNewSessionMenu
-            host={this}
-            active={this.navigationVisible}
-            access={this.readNewSessionAccess()}
-          />
-        </Show>,
-      );
+      const toolbar = renderSessionListToolbar(this);
       const online = renderAppSidebarOnline(this);
       const menus = untrack(() => this.sidebarMenus).render();
       return (

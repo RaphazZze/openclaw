@@ -1,4 +1,3 @@
-import type { JSX } from "@solidjs/web";
 import { createMemo, Show, untrack } from "solid-js";
 import { gatewayPresentationScope } from "../app/gateway-presentation-scope.ts";
 import { isMobileNavLayout } from "../app/mobile-nav-layout.ts";
@@ -7,7 +6,6 @@ import { getLocale, t } from "../lib/reactive/i18n.ts";
 import type { SessionListHost } from "./app-sidebar-session-render-types.ts";
 import { renderSessionOwnerAvatar } from "./session-owner-chip.ts";
 import { Icon } from "./solid/icon.tsx";
-import { renderNewSessionLink } from "./solid/new-session-link.tsx";
 import { Picker } from "./solid/select-picker.tsx";
 
 type SessionFilterHost = Pick<SessionListHost, "sessionsStatusFilter">;
@@ -138,35 +136,11 @@ function renderSidebarSessionFilter(
     </button>
   );
 }
-export function renderSessionListToolbar(host: SessionListHost, teamNewSession?: JSX.Element) {
-  const newSessionAccess = createMemo(() => host.readNewSessionAccess());
+export function renderSessionListToolbar(host: SessionListHost) {
   return (
     <div class="sidebar-session-toolbar">
       <SidebarOwnerPicker host={host} />
       {renderSidebarSessionFilter(host, "sidebar-session-toolbar__button")}
-      <Show
-        when={host.sidebarAgentsMode === "roster"}
-        fallback={renderNewSessionLink({
-          get basePath() {
-            return host.basePath;
-          },
-          get agentId() {
-            return host.expandedAgentId();
-          },
-          className: "sidebar-session-toolbar__button sidebar-new-session",
-          get label() {
-            return t("agentChip.newConversation");
-          },
-          showShortcut: true,
-          get disabledReason() {
-            const access = newSessionAccess();
-            return access.allowed ? undefined : access.reason;
-          },
-          onOpen: (agentId, target) => host.requestOpenNewSession(agentId, target),
-        })}
-      >
-        {teamNewSession}
-      </Show>
     </div>
   );
 }

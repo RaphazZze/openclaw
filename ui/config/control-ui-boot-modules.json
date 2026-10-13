@@ -1966,6 +1966,7 @@
   "ui/src/pages/chat/components/chat-context-window-control.ts",
   "ui/src/pages/chat/components/chat-effort-picker.tsx",
   "ui/src/pages/chat/components/chat-image-actions.ts",
+  "ui/src/pages/chat/components/chat-image-preview-size.ts",
   "ui/src/pages/chat/components/chat-media-playback.ts",
   "ui/src/pages/chat/components/chat-media-source.ts",
   "ui/src/pages/chat/components/chat-message-attachment-admission-model.ts",

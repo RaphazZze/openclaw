@@ -314,10 +314,8 @@ describe("AppSidebar agent roster", () => {
     expect(context.agentSelection.state).toEqual({ selectedId: "recent", scopeId: "recent" });
   });
 
-  it("defers agent menus and offers new sessions in group order after opening", async () => {
+  it("defers agent menus and retains rail new-session links in group order", async () => {
     const { sidebar } = await mountRoster();
-    const onOpen = vi.fn();
-    sidebar.onOpenNewSession = onOpen;
     await toggleRoster(sidebar);
     await vi.waitFor(() => expect(agentIds(sidebar)).toHaveLength(3));
     expect(sidebar.querySelectorAll(".sidebar-agent-roster__menu wa-dropdown-item")).toHaveLength(
@@ -343,35 +341,33 @@ describe("AppSidebar agent roster", () => {
     expect(sidebar.querySelectorAll(".sidebar-agent-roster__menu wa-dropdown-item")).toHaveLength(
       3,
     );
+    await vi.dynamicImportSettled();
+    flush();
     const menus = sidebar.querySelectorAll(".sidebar-new-session-menu");
     expect(menus).toHaveLength(1);
-    for (const menu of menus) {
-      expect(menu.querySelectorAll("wa-dropdown-item")).toHaveLength(0);
-      menu.dispatchEvent(new Event("wa-show"));
-      flush();
-      const options = [...menu.querySelectorAll("wa-dropdown-item")];
-      expect(options.map((item) => item.getAttribute("value"))).toEqual(agentIds(sidebar));
-      expect(options.map((item) => item.querySelector("a")?.getAttribute("href"))).toEqual(
-        agentIds(sidebar).map((id) => `/new?agent=${id}`),
-      );
-      expect(options[0]?.textContent).toContain("Harbor");
-      await vi.waitFor(() =>
-        expect(options[2]?.querySelector(".identity-avatar__agent-face")).not.toBeNull(),
-      );
-      menu.dispatchEvent(new Event("wa-hide"));
-      menu.dispatchEvent(new Event("wa-show"));
-      flush();
-      const retainedOptions = [...menu.querySelectorAll("wa-dropdown-item")];
-      expect(retainedOptions).toHaveLength(options.length);
-      retainedOptions.forEach((item, index) => expect(item).toBe(options[index]));
-    }
-    menus[0]?.dispatchEvent(
-      new CustomEvent("wa-select", {
-        detail: { item: menus[0].querySelector('[value="recent"]') },
-        bubbles: true,
-      }),
+    const trigger = menus[0]!.querySelector(".sidebar-new-session");
+    const options = [...menus[0]!.querySelectorAll<HTMLAnchorElement>('a[role="menuitem"]')];
+    expect(options.map((item) => item.getAttribute("data-value"))).toEqual(agentIds(sidebar));
+    expect(options.map((item) => item.getAttribute("href"))).toEqual(
+      agentIds(sidebar).map((id) => `/new?agent=${id}`),
     );
-    expect(onOpen).toHaveBeenCalledWith("recent");
+    expect(options[0]?.textContent).toContain("Harbor");
+    expect(trigger?.getAttribute("aria-expanded")).toBe("false");
+    expect(menus[0]!.querySelector(".sidebar-agent-roster__avatar")).toBeNull();
+    for (const view of ["pages", "online", "sessions"] as const) {
+      for (const collapsed of [false, true]) {
+        sidebar.navigationView = view;
+        sidebar.navigationCollapsed = collapsed;
+        await sidebar.updateComplete;
+        expect(sidebar.querySelector(".sidebar-rail .sidebar-new-session")).toBe(trigger);
+        expect(sidebar.querySelectorAll(".sidebar-new-session-menu")).toHaveLength(1);
+        expect(sidebar.querySelector(".sidebar-session-toolbar .sidebar-new-session")).toBeNull();
+      }
+    }
+    const retainedOptions = [...menus[0]!.querySelectorAll('a[role="menuitem"]')];
+    expect(retainedOptions).toHaveLength(options.length);
+    retainedOptions.forEach((item, index) => expect(item).toBe(options[index]));
+    expect(menus[0]!.querySelector(".sidebar-agent-roster__avatar")).toBeNull();
   });
 
   it.each([undefined, "main"])(

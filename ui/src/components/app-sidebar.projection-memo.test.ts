@@ -291,10 +291,10 @@ describe("sidebar projection memo", () => {
     expect(sidebar.rosterSessionSource).toBe(source);
     await refresh;
     await settleRoster(mounted.sidebar);
-    const newSession = sidebar.querySelector(".sidebar-new-session-menu")!;
-    newSession.dispatchEvent(new Event("wa-show"));
+    await vi.dynamicImportSettled();
     flush();
-    const menuItems = [...newSession.querySelectorAll("wa-dropdown-item")];
+    const newSession = sidebar.querySelector(".sidebar-new-session-menu")!;
+    const menuItems = [...newSession.querySelectorAll('a[role="menuitem"]')];
     expect(menuItems).toHaveLength(3);
     const sessionKey = "agent:main:recent";
     const row = () => sidebar.querySelector(`[data-session-key="${sessionKey}"]`);
@@ -319,7 +319,7 @@ describe("sidebar projection memo", () => {
     expect(projectRows).not.toHaveBeenCalled();
     expect(sections).not.toHaveBeenCalled();
     expect(sidebar.querySelector(".sidebar-new-session-menu")).toBe(newSession);
-    const retainedItems = [...newSession.querySelectorAll("wa-dropdown-item")];
+    const retainedItems = [...newSession.querySelectorAll('a[role="menuitem"]')];
     expect(retainedItems).toHaveLength(menuItems.length);
     retainedItems.forEach((item, index) => expect(item).toBe(menuItems[index]));
   });
