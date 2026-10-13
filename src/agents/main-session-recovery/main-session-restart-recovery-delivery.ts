@@ -111,7 +111,7 @@ export async function prepareRestartRecoveryDeliveryCurrent(
     ) === deliveryContextKey(params.deliveryContext);
   let readCurrent: () => SessionEntry | undefined;
   if (source) {
-    readCurrent = source.readCurrent;
+    readCurrent = () => source.readCurrent();
   } else {
     try {
       readCurrent = await withSessionEntryReadOnlyInWorker(
