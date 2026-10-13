@@ -442,7 +442,9 @@ describe("audit event persistence", () => {
         owner.db.exec("DROP TRIGGER reject_audit_expiry");
         const committed = record(3);
         expect(committed).toBeDefined();
-        expect(owner.db.prepare("SELECT event_id FROM audit_events").all()).toEqual([
+        expect(
+          owner.db.prepare("SELECT event_id FROM audit_events ORDER BY sequence").all(),
+        ).toEqual([
           ...(mode === "warm insert" ? [{ event_id: first?.eventId }] : []),
           { event_id: committed?.eventId },
         ]);
