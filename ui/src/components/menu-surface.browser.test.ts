@@ -105,14 +105,6 @@ function menuSurface(dropdown: Dropdown): HTMLElement {
   return surface;
 }
 
-async function settledMenuSurface(dropdown: Dropdown) {
-  await dropdown.updateComplete;
-  await Promise.all(
-    [...dropdown.querySelectorAll("wa-dropdown-item")].map((item) => item.updateComplete),
-  );
-  return menuSurface(dropdown);
-}
-
 async function openMenu(dropdown: Dropdown) {
   const shown = new Promise<Event>((resolve) => {
     dropdown.addEventListener("wa-after-show", resolve, { once: true });
