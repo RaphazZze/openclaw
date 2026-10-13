@@ -117,7 +117,11 @@ export function renderSidebarRail(
               }
               data-navigation-view={view}
               aria-label={viewLabel(view)}
-              aria-pressed={host.navigationView === view ? "true" : "false"}
+              aria-pressed={
+                host.navigationVisible && !host.navigationCollapsed && host.navigationView === view
+                  ? "true"
+                  : "false"
+              }
               onClick={() => {
                 const active = host.navigationView === view;
                 host.navigationView = view;

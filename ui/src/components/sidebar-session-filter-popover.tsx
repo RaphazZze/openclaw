@@ -64,13 +64,9 @@ function renderSidebarSessionFilterPopover(
       event.preventDefault();
       event.stopPropagation();
       close(true);
-    } else if (
-      event.key === "Tab" &&
-      !event.defaultPrevented &&
-      isMobileNavLayout() &&
-      event.currentTarget instanceof HTMLElement
-    ) {
-      keepSheetFocus(event.currentTarget, event);
+    } else if (event.key === "Tab" && !event.defaultPrevented && isMobileNavLayout()) {
+      // SAFETY: This panel handler can have a retargeted currentTarget; its rendered panel exists.
+      keepSheetFocus(host.querySelector<HTMLElement>(".sidebar-session-filter-panel")!, event);
     }
   };
   const handleFocusOut = (event: FocusEvent) => {
