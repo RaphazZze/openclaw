@@ -120,7 +120,15 @@ suite.define(() => {
       });
 
       const message = page.locator(".new-session-page__message");
-      await message.pressSequentially("burst", { delay: 20 });
+      // Keep this burst in one browser task, independent of protocol or runner delays.
+      await message.evaluate((element: HTMLTextAreaElement) => {
+        for (const character of "burst") {
+          element.value += character;
+          element.dispatchEvent(
+            new InputEvent("input", { data: character, inputType: "insertText", bubbles: true }),
+          );
+        }
+      });
       await expect.poll(() => rawDraftMatches(page, "burst", 1)).toBe(true);
       const transactionCount = await page.evaluate(
         () =>
