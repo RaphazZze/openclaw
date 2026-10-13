@@ -28,7 +28,7 @@ vi.mock("../infra/outbound/delivery-queue-media-spool.js", () => ({
   pruneOrphanedDeliveryQueueMedia: pruneOrphanedDeliveryQueueMediaMock,
 }));
 vi.mock("../infra/device-bootstrap.js", () => ({
-  pruneExpiredDevicePairSetupCompletions: vi.fn(async () => 0),
+  startDevicePairSetupMaintenance: vi.fn(async () => 0),
 }));
 
 let clock: ReturnType<typeof createGatewaySchedulerClock>;

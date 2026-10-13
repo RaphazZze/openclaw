@@ -19,10 +19,10 @@ const cleanupManagedOutgoingMediaRecordsMock = vi.fn(async () => ({
   deletedFileCount: 0,
   retainedCount: 0,
 }));
-const pruneExpiredDevicePairSetupCompletionsMock = vi.hoisted(() => vi.fn(async () => 0));
+const startDevicePairSetupMaintenanceMock = vi.hoisted(() => vi.fn(async () => 0));
 
 vi.mock("../infra/device-bootstrap.js", () => ({
-  pruneExpiredDevicePairSetupCompletions: pruneExpiredDevicePairSetupCompletionsMock,
+  startDevicePairSetupMaintenance: startDevicePairSetupMaintenanceMock,
 }));
 
 vi.mock("../infra/delivery-queue-sqlite.js", async () => {
@@ -103,7 +103,7 @@ describe("gateway dedupe maintenance", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.clearAllMocks();
-    pruneExpiredDevicePairSetupCompletionsMock.mockReset().mockResolvedValue(0);
+    startDevicePairSetupMaintenanceMock.mockReset().mockResolvedValue(0);
   });
 
   it("releases an unused expired artifact grant while its connection stays open", async () => {

@@ -59,6 +59,8 @@ beforeEach(() => {
   runtimeFactoryMocks.createDiskSpace.mockReturnValue({
     read: vi.fn(),
     version: vi.fn(() => 0),
+    invalidate: vi.fn(),
+    nextSweepAtMs: () => Infinity,
     sweep: vi.fn().mockResolvedValue(undefined),
   });
 });
@@ -91,6 +93,8 @@ describe("worker placement startup health lifetime", () => {
     const diskSpace = {
       read: vi.fn(),
       version: vi.fn(() => 0),
+      invalidate: vi.fn(),
+      nextSweepAtMs: () => time.clock.now() + 60_000,
       sweep: vi.fn(async () => {
         if (holdScheduledWork) {
           scheduledHealthStarted.resolve();

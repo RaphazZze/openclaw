@@ -10,7 +10,7 @@ import { createChatAbortMarker } from "./server-chat-state.js";
 import { createGatewayMaintenanceStateForTest } from "./test-helpers.maintenance-state.js";
 
 vi.mock("../infra/device-bootstrap.js", () => ({
-  pruneExpiredDevicePairSetupCompletions: vi.fn(async () => 0),
+  startDevicePairSetupMaintenance: vi.fn(async () => 0),
 }));
 
 const ABORTED_RUN_TTL_MS = 60 * 60_000;

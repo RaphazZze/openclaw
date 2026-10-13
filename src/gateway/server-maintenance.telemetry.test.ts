@@ -28,7 +28,7 @@ vi.mock("../infra/secure-random.js", async (importOriginal) => ({
 }));
 
 vi.mock("../infra/device-bootstrap.js", () => ({
-  pruneExpiredDevicePairSetupCompletions: devicePairCleanupMock,
+  startDevicePairSetupMaintenance: devicePairCleanupMock,
 }));
 
 vi.mock("../infra/telemetry.js", () => ({
