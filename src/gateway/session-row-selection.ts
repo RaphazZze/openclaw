@@ -79,7 +79,7 @@ export function createSessionRowSelection(
         entry,
         identities,
         cfg,
-        configuredAgentIds,
+        (configuredAgentIds ??= new Set(listAgentIds(cfg))),
       )?.actor;
       if (owner?.identity?.type === "profile") {
         related.add(owner.identity.id);

@@ -1569,6 +1569,10 @@ describe("capability cli", () => {
       provider: "minimax",
       model: "MiniMax-Hailuo-2.3",
       attempts: [],
+      ignoredOverrides: [
+        { key: "audio", value: true },
+        { key: "watermark", value: true },
+      ],
       videos: [
         {
           buffer: Buffer.from("video-bytes"),
@@ -1605,6 +1609,10 @@ describe("capability cli", () => {
     expect(videoCall?.audio).toBe(true);
     expect(videoCall?.watermark).toBe(true);
     expect(videoCall?.timeoutMs).toBe(300000);
+    expect(firstJsonOutput()?.ignoredOverrides).toEqual([
+      { key: "audio", value: true },
+      { key: "watermark", value: true },
+    ]);
   });
 
   it("fails video generate when a provider returns an undeliverable asset", async () => {

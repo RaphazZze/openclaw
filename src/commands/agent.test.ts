@@ -94,7 +94,7 @@ const configIoMocks = vi.hoisted(() => ({
   readConfigFileSnapshotForWrite: vi.fn(),
 }));
 
-// mock-isolation: Command fixtures supply config without reading the operator's state.
+// mock-isolation: Command fixtures supply in-memory runtime/source config instead of persisted config.
 vi.mock("../config/io.js", () => ({
   captureRuntimeConfigAsyncReader: () => async () => configIoMocks.loadConfig(),
   getRuntimeConfig: configIoMocks.loadConfig,
