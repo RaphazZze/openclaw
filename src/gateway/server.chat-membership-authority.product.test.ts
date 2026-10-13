@@ -44,7 +44,7 @@ function holdSessionAuthorizationRead(sessionKey: string) {
     if (
       !held &&
       request.method === "chat.send" &&
-      request.requestParams.sessionKey === sessionKey
+      asOptionalRecord(request.requestParams)?.sessionKey === sessionKey
     ) {
       held = true;
       readCaptured.resolve();
