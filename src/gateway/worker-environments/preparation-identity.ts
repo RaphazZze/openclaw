@@ -39,6 +39,10 @@ const Preparation = z
   })
   .strict();
 
+const EmptyPreparation = Preparation.omit({ setupRecipe: true, runSetupScript: true }).extend({
+  source: z.literal("empty"),
+});
+
 export type WorkerPreparationArtifacts = z.infer<typeof Artifacts>;
 export type WorkerProjectPreparationIdentity = z.infer<typeof Preparation>;
 export type WorkerProviderPreparedIntent = {
@@ -61,12 +65,35 @@ export function readWorkerProjectPreparation(
   return parsed.data;
 }
 
-export function createWorkerProjectPreparationIdentity(params: {
+export function readWorkerPreparation(
+  profile: Readonly<Record<string, unknown>>,
+): WorkerProjectPreparationIdentity | undefined {
+  if (profile.runtimePreparation === undefined) {
+    return readWorkerProjectPreparation(profile.project);
+  }
+  const parsed = EmptyPreparation.safeParse(profile.runtimePreparation);
+  if (!parsed.success || profile.project !== undefined) {
+    throw new Error("Worker runtime preparation identity is invalid");
+  }
+  return parsed.data;
+}
+
+export function workerPreparationSourceKey(profile: Readonly<Record<string, unknown>>) {
+  if (profile.runtimePreparation !== undefined) {
+    readWorkerPreparation(profile);
+    // Capacity spans runtime generations; the preparation key separately fences
+    // claims by namespace, settings, execution mode, and exact artifacts.
+    return "empty";
+  }
+  return isRecord(profile.project) ? Digest.parse(profile.project.key) : undefined;
+}
+
+export function createWorkerPreparationIdentity(params: {
   namespace: string;
   providerId: string;
   profileId: string;
   profileSnapshot: WorkerProfile;
-  project: WorkerProjectSnapshot;
+  project?: WorkerProjectSnapshot;
   target: WorkerProjectPreparationIdentity["target"];
   artifacts: WorkerPreparationArtifacts;
   setupRecipe?: string;
@@ -88,7 +115,12 @@ export function createWorkerProjectPreparationIdentity(params: {
   // Source root is transport location only: linked worktrees share Git identity.
   // The explicit contract version also invalidates Gateway-owned setup semantics.
   // The provider-resolved target owns OS identity, including an omitted default.
-  const { os: _requestedOs, ...profile } = params.profileSnapshot;
+  const {
+    os: _requestedOs,
+    project: _project,
+    runtimePreparation: _runtime,
+    ...profile
+  } = params.profileSnapshot;
   const compatibility = {
     ...facts,
     namespace: params.namespace,
@@ -99,7 +131,7 @@ export function createWorkerProjectPreparationIdentity(params: {
       machineClass: facts.target.machineClass,
       executionMode: params.profileSnapshot.executionMode ?? "worker-turn",
     },
-    project: { key: params.project.key },
+    project: params.project ? { key: params.project.key } : { source: "empty" },
     workspaceProtocol: NODE_WORKER_WORKSPACE_PREPARE_COMMAND,
   };
   const digest = (value: unknown) =>
@@ -109,7 +141,10 @@ export function createWorkerProjectPreparationIdentity(params: {
   return {
     key: digest({
       ...compatibility,
-      project: { ...compatibility.project, baseCommit: params.project.baseCommit },
+      project: {
+        ...compatibility.project,
+        ...(params.project ? { baseCommit: params.project.baseCommit } : {}),
+      },
     }),
     cacheKey: digest(compatibility),
     ...facts,

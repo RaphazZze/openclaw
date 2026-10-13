@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  createWorkerProjectPreparationIdentity,
+  createWorkerPreparationIdentity,
+  readWorkerPreparation,
   readWorkerProjectPreparation,
 } from "./preparation-identity.js";
 import type { WorkerLocalProjectSnapshot } from "./workspace-git-base.js";
 
-const input: Omit<Parameters<typeof createWorkerProjectPreparationIdentity>[0], "project"> & {
+const input: Omit<Parameters<typeof createWorkerPreparationIdentity>[0], "project"> & {
   project: WorkerLocalProjectSnapshot;
 } = {
   namespace: "gateway-one",
@@ -30,6 +31,25 @@ const input: Omit<Parameters<typeof createWorkerProjectPreparationIdentity>[0], 
 };
 
 describe("worker preparation identity", () => {
+  it("keeps empty runtime preparation separate from project content", () => {
+    const { project: _project, setupRecipe: _setupRecipe, ...runtime } = input;
+    const preparation = createWorkerPreparationIdentity(runtime);
+    expect(preparation.key).not.toBe(createWorkerPreparationIdentity(input).key);
+    expect(preparation).not.toHaveProperty("setupRecipe");
+    expect(
+      readWorkerPreparation({
+        ...runtime.profileSnapshot,
+        runtimePreparation: { source: "empty", ...preparation },
+      }),
+    ).toEqual({ source: "empty", ...preparation });
+    expect(() =>
+      readWorkerPreparation({
+        project: input.project,
+        runtimePreparation: { source: "empty", ...preparation },
+      }),
+    ).toThrow("runtime preparation identity is invalid");
+  });
+
   it("shares identity across linked source paths, JSON field order and plugin order", () => {
     const equivalent = structuredClone(input);
     equivalent.project.root = "/source/second-worktree";
@@ -40,17 +60,17 @@ describe("worker preparation identity", () => {
       machineClass: "small",
     };
     equivalent.artifacts.enabledPluginIds.reverse();
-    expect(createWorkerProjectPreparationIdentity(equivalent)).toEqual(
-      createWorkerProjectPreparationIdentity(input),
+    expect(createWorkerPreparationIdentity(equivalent)).toEqual(
+      createWorkerPreparationIdentity(input),
     );
   });
 
   it("separates skipped setup caches while preserving the default identity", () => {
-    const original = createWorkerProjectPreparationIdentity(input);
-    const enabled = createWorkerProjectPreparationIdentity({ ...input, runSetupScript: true });
+    const original = createWorkerPreparationIdentity(input);
+    const enabled = createWorkerPreparationIdentity({ ...input, runSetupScript: true });
     expect(enabled).toEqual(original);
     expect(enabled).not.toHaveProperty("runSetupScript");
-    const skipped = createWorkerProjectPreparationIdentity({ ...input, runSetupScript: false });
+    const skipped = createWorkerPreparationIdentity({ ...input, runSetupScript: false });
     expect(skipped.setupRecipe).toBe(original.setupRecipe);
     expect(skipped.runSetupScript).toBe(false);
     expect(skipped.key).not.toBe(original.key);
@@ -60,6 +80,8 @@ describe("worker preparation identity", () => {
 
   it.each<[string, Partial<typeof input>]>([
     ["namespace", { namespace: "gateway-two" }],
+    ["provider", { providerId: "another-provider" }],
+    ["profile id", { profileId: "another-profile" }],
     ["commit", { project: { ...input.project, baseCommit: "1".repeat(40) } }],
     ["recipe", { setupRecipe: "2".repeat(40) }],
     [
@@ -90,14 +112,21 @@ describe("worker preparation identity", () => {
       },
     ],
   ])("invalidates a changed %s before allocation", (label, change) => {
-    const original = createWorkerProjectPreparationIdentity(input);
-    const next = createWorkerProjectPreparationIdentity({ ...input, ...change });
+    const original = createWorkerPreparationIdentity(input);
+    const next = createWorkerPreparationIdentity({ ...input, ...change });
     expect(next.key).not.toBe(original.key);
     expect(next.cacheKey).toMatch(/^[a-f0-9]{64}$/u);
     if (label === "commit") {
       expect(next.cacheKey).toBe(original.cacheKey);
     } else {
       expect(next.cacheKey).not.toBe(original.cacheKey);
+      const { project: _project, setupRecipe: _setupRecipe, ...runtime } = input;
+      const { project: _changedProject, setupRecipe: _changedRecipe, ...runtimeChange } = change;
+      if (label !== "recipe") {
+        expect(createWorkerPreparationIdentity({ ...runtime, ...runtimeChange }).key).not.toBe(
+          createWorkerPreparationIdentity(runtime).key,
+        );
+      }
     }
   });
 });

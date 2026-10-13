@@ -21,15 +21,17 @@ type ProjectPreparation = NonNullable<
   NonNullable<Parameters<WorkerProvider["provision"]>[2]>["project"]
 >;
 
-async function repository(name: string) {
+async function repository(name: string, empty = false) {
   const root = path.join(support.testState.root, name);
   await fs.mkdir(root);
   await requireGit(root, ["init", "--quiet"]);
   await requireGit(root, ["config", "user.name", "Project Test"]);
   await requireGit(root, ["config", "user.email", "project@example.invalid"]);
-  await fs.writeFile(path.join(root, "input.txt"), `${name} base\n`);
-  await requireGit(root, ["add", "."]);
-  await requireGit(root, ["commit", "--quiet", "-m", "base"]);
+  if (!empty) {
+    await fs.writeFile(path.join(root, "input.txt"), `${name} base\n`);
+    await requireGit(root, ["add", "."]);
+  }
+  await requireGit(root, ["commit", "--quiet", "--allow-empty", "-m", "base"]);
   return { root, baseCommit: await requireGit(root, ["rev-parse", "HEAD"]) };
 }
 
@@ -91,10 +93,14 @@ describe("worker provider project preparation ownership", () => {
     expect(environments[1]?.profileSnapshot).toEqual(environments[0]?.profileSnapshot);
   });
 
-  it.each([false, true, undefined])(
-    "requires explicit dedicated classification after prepared node provisioning (sharedHost=%s)",
-    async (sharedHost) => {
-      const git = await repository("prepared-host-classification");
+  it.each(
+    ([false, true, undefined] as const).flatMap((sharedHost) =>
+      [false, true].map((emptyWorkspace) => ({ sharedHost, emptyWorkspace })),
+    ),
+  )(
+    "requires explicit dedicated classification after prepared node provisioning (sharedHost=$sharedHost, empty workspace=$emptyWorkspace)",
+    async ({ sharedHost, emptyWorkspace }) => {
+      const git = await repository("prepared-host-classification", emptyWorkspace);
       const deviceId = "prepared-node";
       const registerPreparedWorkspace = vi.fn<
         NonNullable<support.WorkerEnvironmentServiceOptions["registerPreparedWorkspace"]>
@@ -106,22 +112,26 @@ describe("worker provider project preparation ownership", () => {
         supportsProjectPreparation: () => true,
         resolvePreparationTarget: () => ({ machineClass: "small", platform: "linux" }),
         provision: async (_profile, _operationId, options) => {
-          const project = expectDefined(options?.project, "project preparation");
-          const preparation = expectDefined(project.preparation, "prepared identity");
-          const directory = `/worker/.openclaw-worker/prepared/gateway/${preparation.cacheKey}`;
-          await project.prepare({
-            runScript: async () => JSON.stringify({ ready: true, retainedWorkspace: null }),
-            upload: async () => {
-              throw new Error("cached seed must not upload");
-            },
-            runScriptWithBudget: async () =>
-              JSON.stringify({
-                workspaceDir: `${directory}/workspace`,
-                homeDir: `${directory}/home`,
-                sourceManifestRef: `sha256:${"a".repeat(64)}`,
-                preparedManifestRef: `sha256:${"b".repeat(64)}`,
-              }),
-          });
+          if (emptyWorkspace) {
+            expect(options?.project).toBeUndefined();
+          } else {
+            const project = expectDefined(options?.project, "project preparation");
+            const preparation = expectDefined(project.preparation, "prepared identity");
+            const directory = `/worker/.openclaw-worker/prepared/gateway/${preparation.cacheKey}`;
+            await project.prepare({
+              runScript: async () => JSON.stringify({ ready: true, retainedWorkspace: null }),
+              upload: async () => {
+                throw new Error("cached seed must not upload");
+              },
+              runScriptWithBudget: async () =>
+                JSON.stringify({
+                  workspaceDir: `${directory}/workspace`,
+                  homeDir: `${directory}/home`,
+                  sourceManifestRef: `sha256:${"a".repeat(64)}`,
+                  preparedManifestRef: `sha256:${"b".repeat(64)}`,
+                }),
+            });
+          }
           const enrollment = await options!.beginNodeEnrollment!();
           if (enrollment.mode !== "connect") {
             throw new Error("Fresh worker must use its pending enrollment");
@@ -175,9 +185,7 @@ describe("worker provider project preparation ownership", () => {
         projectPath: git.root,
       });
       if (sharedHost !== false) {
-        await expect(creation).rejects.toThrow(
-          "Prepared worker requires its dedicated registered workspace",
-        );
+        await expect(creation).rejects.toThrow("Prepared worker requires a dedicated environment");
         expect(registerPreparedWorkspace).not.toHaveBeenCalled();
         return;
       }
@@ -187,6 +195,12 @@ describe("worker provider project preparation ownership", () => {
         sharedHost: false,
         nodeDeviceId: deviceId,
       });
+      if (emptyWorkspace) {
+        expect(environment.profileSnapshot.project).toBeUndefined();
+        expect(environment.profileSnapshot.runtimePreparation).toMatchObject({ source: "empty" });
+        expect(registerPreparedWorkspace).not.toHaveBeenCalled();
+        return;
+      }
       const preparation = expectDefined(
         readWorkerProjectPreparation(environment.profileSnapshot.project),
         "prepared profile",

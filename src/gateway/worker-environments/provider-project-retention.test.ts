@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createWorkerProjectPreparationIdentity } from "./preparation-identity.js";
+import { createWorkerPreparationIdentity } from "./preparation-identity.js";
 import { PROJECT_KEY, usePreparedPoolFixture } from "./prepared-pool.test-support.js";
 import { createWorkerProviderIntent } from "./provider-intent.js";
 import { prepareWorkerProviderProject } from "./provider-project-preparation.js";
@@ -50,7 +50,7 @@ describe("prepared project retention compatibility", () => {
       openclawVersion: "2026.8.1",
       protocolFeatures: [],
     };
-    const preparation = createWorkerProjectPreparationIdentity({
+    const preparation = createWorkerPreparationIdentity({
       namespace: "gateway",
       providerId: fixture.provider.id,
       profileId: "development",

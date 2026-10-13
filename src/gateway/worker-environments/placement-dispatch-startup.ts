@@ -28,6 +28,7 @@ import {
 } from "./placement-dispatch-provisioning.js";
 import { reportPlacementTransition } from "./placement-record.js";
 import {
+  readWorkerPreparation,
   readWorkerProjectPreparation,
   type WorkerProviderPreparedIntent,
 } from "./preparation-identity.js";
@@ -145,7 +146,7 @@ export function createWorkerPlacementDispatchStartup(options: {
     intent: WorkerProviderPreparedIntent;
     assertCurrent: WorkerPlacementAuthorization;
   }) => {
-    const preparation = readWorkerProjectPreparation(params.intent.profileSnapshot.project);
+    const preparation = readWorkerPreparation(params.intent.profileSnapshot);
     if (!preparation || params.intent.preparationKey !== preparation.key) {
       return undefined;
     }

@@ -1,6 +1,6 @@
 import { normalizeCapabilityProviderId } from "../../plugins/provider-registry-shared.js";
 import type { WorkerProvider } from "../../plugins/types.js";
-import { readWorkerProjectPreparation } from "./preparation-identity.js";
+import { readWorkerPreparation, workerPreparationSourceKey } from "./preparation-identity.js";
 import type { WorkerProviderPreparedIntent } from "./preparation-identity.js";
 import {
   type createPreparedPoolPresence,
@@ -39,8 +39,8 @@ export type PoolOptions = Omit<PreparedPoolPresenceOptions, "schedule" | "prepar
   warn: (message: string) => void;
 };
 export const groupKey = (record: Environment) => {
-  const project = readWorkerProjectSnapshot(record.profileSnapshot.project);
-  return project ? JSON.stringify([record.providerId, record.profileId, project.key]) : undefined;
+  const sourceKey = workerPreparationSourceKey(record.profileSnapshot);
+  return sourceKey ? JSON.stringify([record.providerId, record.profileId, sourceKey]) : undefined;
 };
 // Failed claims inherit only the original preparation window; success records
 // a separate fact that survives teardown and placement retirement.
@@ -127,7 +127,7 @@ export function admitSources(ctx: PassContext): Generations {
     if (isSupersededPresenceReserve(record, demand)) {
       continue;
     }
-    const preparation = readWorkerProjectPreparation(record.profileSnapshot.project);
+    const preparation = readWorkerPreparation(record.profileSnapshot);
     if (key && demandAtMs !== undefined && preparation) {
       if (record.lastActivatedAtMs !== null) {
         const generationKey = JSON.stringify([key, preparation.key]);
@@ -159,7 +159,7 @@ export function admitSources(ctx: PassContext): Generations {
     ) {
       continue;
     }
-    const preparationKey = readWorkerProjectPreparation(record.profileSnapshot.project)!.key;
+    const preparationKey = readWorkerPreparation(record.profileSnapshot)!.key;
     try {
       const provider = options.resolveProvider(record.providerId);
       if (!provider) {
