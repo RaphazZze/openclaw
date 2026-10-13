@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import { Worker } from "node:worker_threads";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
@@ -11,6 +11,7 @@ import { withinTest } from "../../test/helpers/promise.js";
 import * as logging from "../logging/logger.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { drainGlobalSingletonLifecycleState } from "../shared/global-singleton.js";
+import { createOpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-db-async-lifecycle.js";
 import { OPENCLAW_SQLITE_BUSY_TIMEOUT_MS } from "../state/openclaw-state-db-contract.js";
 import { initializeSqliteRuntimeCapabilities } from "./bun-sqlite-library.js";
 import { onInternalDiagnosticEvent, waitForDiagnosticEventsDrained } from "./diagnostic-events.js";
@@ -23,6 +24,7 @@ import {
   appendWorkerRow as append,
   readWorkerRows as read,
 } from "./sqlite-worker-fixture.test-support.js";
+import { createSqliteWorkerOperationAdmission } from "./sqlite-worker-operation-admission.js";
 import {
   reserveSqliteWorkerInputPreparation,
   runSqliteWorkerStoreOperation,
@@ -584,5 +586,45 @@ poolIt.each([
   } finally {
     await broker.close();
     parallelism.mockRestore();
+  }
+});
+it("rolls back a broker write when maintenance closes before the commit grant reaches native", async () => {
+  const file = databasePath();
+  const gatePath = databasePath();
+  writeFileSync(gatePath, "ready");
+  const store = await open(file, {
+    type: "prepare",
+    markerPath: databasePath(),
+    gatePath,
+    guarded: true,
+  });
+  const maintenance = createOpenClawDatabaseMaintenanceScope();
+  // A captured synchronous frame can enter while OPEN, but owns no drain hold.
+  const inSource = maintenance.run(() => AsyncLocalStorage.snapshot());
+  let closing: Promise<void> | undefined;
+  const write = inSource(() =>
+    runSqliteWorkerStoreOperation(
+      store,
+      (scope) => scope.execute({ type: "append", input: { value: "revoked" } }),
+      undefined,
+      undefined,
+      () => ({
+        nativeLocations: [file],
+        admission: createSqliteWorkerOperationAdmission((request, grant) => {
+          grant(() => {
+            if (request.stage === "commit") {
+              closing = maintenance.close();
+            }
+          });
+        }),
+      }),
+    ),
+  );
+  try {
+    await expect(write).rejects.toThrow("SQLite maintenance authority is revoked");
+    await closing;
+    expect(await read(store)).toEqual([]);
+  } finally {
+    await maintenance.close();
   }
 });

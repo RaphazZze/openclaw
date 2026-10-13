@@ -26,6 +26,12 @@ export type SqliteWorkerExecutionAuthority = {
   birthtime?: string;
 };
 
+export type SqliteWorkerMaintenanceAuthority = {
+  scope: Int32Array<SharedArrayBuffer>;
+  owners: readonly Int32Array<SharedArrayBuffer>[];
+  frame?: Int32Array<SharedArrayBuffer>;
+};
+
 export type SqliteWorkerAdmissionRequest = {
   stage: "open" | "prepare" | "transaction" | "commit";
   facts: unknown;
@@ -90,6 +96,7 @@ export type SqliteWorkerRequest = {
   operationAdmission?: MessagePort;
   requestCustody?: SqliteWorkerRequestCustodyDescriptor;
   executionAuthority?: SqliteWorkerExecutionAuthority;
+  maintenanceAuthority?: SqliteWorkerMaintenanceAuthority;
   stateDatabasePath?: string;
   databaseAdmissions?: SqliteDatabaseAdmissions;
   timing?: DiagnosticWorkerRequestFields["timing"];

@@ -1,6 +1,7 @@
 import { MessagePort, type Transferable } from "node:worker_threads";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { readAgentDatabaseExecutionAuthority } from "../state/openclaw-agent-execution-authority.js";
+import { isSqliteWorkerMaintenanceAuthorityCurrent } from "../state/openclaw-state-maintenance-authority.js";
 import { StateDatabaseAdmissionPendingError } from "./gateway-state-owner-record.js";
 import { currentSqliteOperationTiming } from "./sqlite-reader-lifecycle.js";
 import {
@@ -27,6 +28,14 @@ function assertRequestCustody(owner: SqliteWorkerOperationContext): void {
   }
   if (owner.executionAuthority && !readAgentDatabaseExecutionAuthority(owner.executionAuthority)) {
     const refusal = new SqliteWorkerError("SQLite execution authority is revoked", "closed");
+    owner.refusal = refusal;
+    throw refusal;
+  }
+  if (
+    owner.maintenanceAuthority &&
+    !isSqliteWorkerMaintenanceAuthorityCurrent(owner.maintenanceAuthority)
+  ) {
+    const refusal = new SqliteWorkerError("SQLite maintenance authority is revoked", "closed");
     owner.refusal = refusal;
     throw refusal;
   }

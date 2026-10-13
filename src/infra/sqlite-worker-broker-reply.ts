@@ -41,6 +41,7 @@ import {
 import {
   createSqliteWorkerOperationAdmission,
   readSqliteWorkerExecutionAuthority,
+  readSqliteWorkerMaintenanceAuthority,
 } from "./sqlite-worker-operation-admission.js";
 import type { SqliteWorkerOperationSettlement } from "./sqlite-worker-operation-settlement.js";
 import { readSqliteWorkerRequestCustody } from "./sqlite-worker-request-custody.js";
@@ -246,6 +247,12 @@ function prepareSqliteWorkerOperationAdmission(
     ),
   };
   job.request.executionAuthority = readSqliteWorkerExecutionAuthority(retained.admission);
+  if (databasePath) {
+    job.request.maintenanceAuthority = readSqliteWorkerMaintenanceAuthority(
+      retained.admission,
+      job.maintenanceScope,
+    );
+  }
   return retained.admission.port;
 }
 

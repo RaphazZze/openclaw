@@ -1,10 +1,13 @@
 import { expect, it, vi } from "vitest";
 import { createDeferredCore } from "../shared/deferred.js";
 import {
+  captureOpenClawDatabaseMaintenanceResource,
   createOpenClawDatabaseMaintenanceScope,
   getOpenClawDatabaseMaintenanceScope,
   observeOpenClawDatabaseMaintenanceResource,
 } from "./openclaw-state-db-async-lifecycle.js";
+import { isSqliteWorkerMaintenanceAuthorityCurrent } from "./openclaw-state-maintenance-authority.js";
+import { captureSqliteWorkerMaintenanceAuthority } from "./openclaw-state-maintenance-context.js";
 
 it("keeps resource custody unprivileged and preserves inherited owner validity", async () => {
   const runtime = createOpenClawDatabaseMaintenanceScope();
@@ -131,4 +134,48 @@ it("keeps nested authority reads in their resource scope without admitting effec
   }
   expect(close).toHaveBeenCalledOnce();
   expect(() => child.assertReadAdmission()).toThrow("resource scope is closed");
+});
+
+it("keeps accepted resource work independent of a transferred resource claim while draining", async () => {
+  const scope = createOpenClawDatabaseMaintenanceScope();
+  const resource = {};
+  scope.own(resource, "shared-handles", () => {});
+  const held = captureOpenClawDatabaseMaintenanceResource(resource, scope);
+  const outside = captureSqliteWorkerMaintenanceAuthority(scope)!;
+  const resume = createDeferredCore();
+  let accepted: typeof outside | undefined;
+  const running = held.run(async () => {
+    accepted = captureSqliteWorkerMaintenanceAuthority(scope);
+    await resume.promise;
+    scope.assertAdmission();
+  });
+  observeOpenClawDatabaseMaintenanceResource(resource);
+  expect(held.assertCurrent).toThrow("resource owner changed");
+  await expect(held.run(async () => {})).rejects.toThrow("resource owner changed");
+  const closing = scope.close();
+  expect(isSqliteWorkerMaintenanceAuthorityCurrent(outside)).toBe(false);
+  expect(isSqliteWorkerMaintenanceAuthorityCurrent(accepted!)).toBe(true);
+  resume.resolve();
+  await running;
+  await closing;
+  expect(isSqliteWorkerMaintenanceAuthorityCurrent(accepted!)).toBe(false);
+});
+
+it("reopens the same scope authority after cleanup failure without reviving a closed scope", async () => {
+  const scope = createOpenClawDatabaseMaintenanceScope();
+  const failure = new Error("cleanup failed");
+  let fail = true;
+  scope.own({}, "shared-handles", () => {
+    if (fail) {
+      throw failure;
+    }
+  });
+  const captured = captureSqliteWorkerMaintenanceAuthority(scope)!;
+  await expect(scope.close()).rejects.toThrow(failure);
+  expect(isSqliteWorkerMaintenanceAuthorityCurrent(captured)).toBe(true);
+  expect(() => scope.run(() => {})).not.toThrow();
+  fail = false;
+  await scope.close();
+  expect(isSqliteWorkerMaintenanceAuthorityCurrent(captured)).toBe(false);
+  expect(() => scope.run(() => {})).toThrow("resource scope is closed");
 });
