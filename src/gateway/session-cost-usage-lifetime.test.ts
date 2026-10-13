@@ -95,8 +95,12 @@ it("coalesces usage publications and flushes committed totals for an immediate o
       });
       return {
         ...buildUsageOverview({
-          sessions,
-          summaries: cached.summaries,
+          rows: sessions.map((session, index) => ({
+            key: session.key,
+            agentId: session.agentId,
+            usage: cached.summaries[index] ?? null,
+            computing: cached.summaries[index] ? undefined : true,
+          })),
           options: {},
           dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
         }),

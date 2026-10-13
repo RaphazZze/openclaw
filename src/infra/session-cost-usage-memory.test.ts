@@ -214,18 +214,17 @@ describe("actor memory usage", () => {
     }
     expect(
       buildUsageOverview({
-        sessions: [
+        rows: [
           { sessionKey, sessionId, sessionFile: first.sessionFile },
           { ...secondTarget, sessionFile: second.sessionFile },
-        ].map((target) => ({
+        ].map((target, index) => ({
           key: target.sessionKey,
           sessionId: target.sessionId,
           agentId: "main",
           updatedAt: 10_000,
-          instances: [{ sessionId: target.sessionId, sessionFile: target.sessionFile }],
+          usage: cached.summaries[index] ?? null,
         })),
         options: { limit: 1 },
-        summaries: cached.summaries,
         dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
       }),
     ).toMatchObject({
