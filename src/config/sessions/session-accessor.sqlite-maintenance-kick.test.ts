@@ -301,6 +301,70 @@ it("resumes an over-cap pass on ordinary activity after runtime protection relea
   }
 });
 
+it("keeps a pending maintenance retry bounded while ordinary writes continue", async ({
+  signal,
+}) => {
+  const { request, scope, storePath, updatedAt } = createStore(86_400_000);
+  request.maintenanceConfig.maxEntries = 1;
+  const victimKey = "agent:main:quiet-retry-victim";
+  runOpenClawAgentWriteTransaction((owner) => {
+    writeSessionEntry(owner, sessionKey, {
+      sessionId: "age-kick",
+      updatedAt,
+      modelSelectionLocked: true,
+    });
+    writeSessionEntry(owner, victimKey, { sessionId: "quiet-retry-victim", updatedAt });
+  }, scope);
+  let keys = [victimKey];
+  const unregister = registerSessionMaintenancePreserveKeysProvider(async () => ({
+    capture: () => keys,
+    dispose() {},
+  }));
+  const writeActivity = (label: string) => {
+    runOpenClawAgentWriteTransaction((owner) => {
+      writeSessionEntry(owner, sessionKey, {
+        sessionId: "age-kick",
+        updatedAt: Date.now(),
+        modelSelectionLocked: true,
+        label,
+      });
+    }, scope);
+    kickSessionEntryMaintenanceAfterWrite(request);
+  };
+  const firstPass = createDeferred();
+  const dispatch = vi.mocked(reclamationRun.runSqliteSessionReclamation);
+  const run = dispatch.getMockImplementation()!;
+  let released = false;
+  dispatch.mockImplementation(async (params) => {
+    const result = await run(params);
+    if (!released && result.kind === "maintenance-plan") {
+      expect(result.value.archived).toBe(0);
+      expect(result.value.durableNoCandidates).not.toBe(true);
+      released = true;
+      keys = [];
+      writeActivity("during result delivery");
+      firstPass.resolve();
+    }
+    return result;
+  });
+  try {
+    kickSessionEntryMaintenanceAfterWrite(request);
+    await withinTest(firstPass.promise, signal);
+    await yieldToEventLoop();
+    for (let tick = 0; tick < 11; tick++) {
+      await vi.advanceTimersByTimeAsync(100);
+      writeActivity(`continued activity ${tick}`);
+      await yieldToEventLoop();
+    }
+    expect(loadSessionEntry({ sessionKey: victimKey, storePath })?.archiveReason).toBe(
+      "active-session-cap",
+    );
+  } finally {
+    await agentDatabase.closeOpenClawAgentDatabasesAsync();
+    unregister();
+  }
+});
+
 it.each(["before immediate"] as const)(
   "stops automatic maintenance when Gateway drain starts %s",
   async () => {

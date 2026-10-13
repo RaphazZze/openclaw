@@ -378,13 +378,12 @@ function scheduleMaintenanceAfterWriteQuiet(
   owner: SessionEntryMaintenanceOwner,
 ): void {
   owner.running = false;
-  owner.retryDelayMs = MAINTENANCE_WRITE_QUIET_MS * 2 ** Math.max(0, owner.rejections - 1);
-  owner.timerDeadlineMonotonicMs = performance.now() + owner.retryDelayMs;
   if (owner.timer) {
-    // A write restarts this one-shot quiet window; no polling or competing retry owner.
-    owner.timer.refresh();
+    // Coalesce writes without letting sustained activity postpone this retry indefinitely.
     return;
   }
+  owner.retryDelayMs = MAINTENANCE_WRITE_QUIET_MS * 2 ** Math.max(0, owner.rejections - 1);
+  owner.timerDeadlineMonotonicMs = performance.now() + owner.retryDelayMs;
   owner.timer = runInDetachedAsyncContext(() =>
     setTimeout(() => {
       owner.timer = undefined;

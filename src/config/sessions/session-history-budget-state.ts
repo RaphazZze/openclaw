@@ -89,7 +89,7 @@ type BudgetKickState = {
 
 export const budgetKickStateByStore = new Map<string, BudgetKickState>();
 
-/** Legacy and SQLite locators share the same physical pressure and maintenance lane. */
+/** Per-agent legacy and SQLite locators share one lane; custom stores can aggregate partitions. */
 export function sessionHistoryBudgetStoreKey(storePath: string): string {
   const target = resolveUnsuffixedSqliteTargetFromSessionStorePath(storePath);
   return sqliteReaderDatabasePathKey(target.agentId ? target.path : storePath);
