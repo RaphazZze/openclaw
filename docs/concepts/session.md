@@ -441,7 +441,8 @@ Delete and reset operations can request a check sooner, but repeated requests
 coalesce to at most one forced check per minute per store. If cleanup exhausts
 eligible history and the store remains over budget, automatic checks back off
 for 30 minutes and log one warning until the pressure clears or the budget changes.
-The legacy store locator and canonical SQLite path share this queue and backoff.
+Per-agent legacy store locators and their canonical SQLite paths share this queue
+and backoff. Custom aggregate store locators retain their own maintenance scope.
 After a pass reclaims nothing, the next automatic check first inspects eligible
 data without reserving the foreground writer; protected-only pressure does not
 repeat archive pruning or checkpoints. Manual cleanup still runs immediately.

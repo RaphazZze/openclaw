@@ -200,28 +200,28 @@ export function kickSessionEntryMaintenanceAfterWrite(
             ...change,
             previousEntry: previous ? previous.previousEntry : change.previousEntry,
           });
-          if (
-            !change.previousEntry &&
-            !(
+          if (!change.previousEntry) {
+            const preserved =
               change.entry.preserved ??
               shouldPreserveMaintenanceEntry({
                 key: change.sessionKey,
                 entry: change.entry,
                 preserveRecentMs: null,
-              })
-            )
-          ) {
+              });
             const fact = created.ageFact;
             const resume =
               !created.running &&
-              (created.noCandidates ||
-                (fact?.entryCount !== undefined &&
+              (created.noCandidates
+                ? !preserved
+                : fact?.entryCount !== undefined &&
                   shouldRunSessionEntryMaintenance({
                     entryCount: fact.entryCount,
                     maxEntries: fact.maintenance.maxEntries,
                     force: false,
-                  })));
-            created.noCandidates = false;
+                  }));
+            if (!preserved) {
+              created.noCandidates = false;
+            }
             if (resume) {
               if (created.retryDelayMs !== undefined) {
                 if (created.rejections >= MAX_MAINTENANCE_REJECTIONS) {

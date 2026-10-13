@@ -78,11 +78,11 @@ const user = (key: string) => ({
   idempotencyKey: `${key}:user`,
 });
 
-it.for(["protected", "interrupted retry", "below cap"] as const)(
-  "resumes idle protected-store maintenance after a lazy worker creates an eligible session (starting state: %s)",
+it.for(["protected", "interrupted retry", "below cap", "below cap protected insert"] as const)(
+  "resumes idle protected-store maintenance after a lazy worker creates a session (starting state: %s)",
   async (startingState, { signal }) => {
     const interruptedRetry = startingState === "interrupted retry";
-    const belowCap = startingState === "below cap";
+    const belowCap = startingState.startsWith("below cap");
     const storePath = state.statePath(`lazy-maintenance-${startingState}.sqlite`);
     const scope = { agentId: "main", path: storePath };
     const protectedKey = "agent:main:lazy-protected";
@@ -168,18 +168,27 @@ it.for(["protected", "interrupted retry", "below cap"] as const)(
       const target = {
         agentId: "main",
         storePath,
-        sessionKey: "agent:main:lazy-eligible",
+        sessionKey:
+          startingState === "below cap protected insert"
+            ? "agent:main:direct:lazy-protected-insert"
+            : "agent:main:lazy-eligible",
         sessionId: "lazy-eligible",
       };
       let victim = target;
-      if (belowCap) {
-        victim = { ...target, sessionKey: "agent:main:lazy-first", sessionId: "lazy-first" };
-        const first = await SessionManager.openAsync(victim, state.workspaceDir);
+      if (belowCap || startingState === "protected") {
+        const firstKey = belowCap ? "lazy-first" : "direct:lazy-protected-insert";
+        const firstTarget = {
+          ...target,
+          sessionKey: `agent:main:${firstKey}`,
+          sessionId: firstKey,
+        };
+        const first = await SessionManager.openAsync(firstTarget, state.workspaceDir);
         await first.appendMessageAsync(user("lazy-maintenance-first"));
         await yieldToEventLoop();
         await vi.advanceTimersByTimeAsync(1_001);
         expect(passes).toBe(protectedPasses);
-        expect(loadSessionEntry(victim)?.archivedAt).toBeUndefined();
+        expect(loadSessionEntry(firstTarget)?.archivedAt).toBeUndefined();
+        victim = belowCap ? firstTarget : target;
       }
       const manager = await SessionManager.openAsync(target, state.workspaceDir);
       await manager.appendMessageAsync(user("lazy-maintenance"));
@@ -189,6 +198,9 @@ it.for(["protected", "interrupted retry", "below cap"] as const)(
       expect(passes).toBeGreaterThan(protectedPasses);
       await withinTest(archived.promise, signal);
       expect(loadSessionEntry(victim)?.archiveReason).toBe("active-session-cap");
+      if (startingState === "below cap protected insert") {
+        expect(loadSessionEntry(target)?.archivedAt).toBeUndefined();
+      }
       expect((await loadTranscriptEvents(target)).at(-1)).toMatchObject({
         message: user("lazy-maintenance"),
       });
