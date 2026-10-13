@@ -12,6 +12,7 @@ const owner = vi.hoisted(() => ({
   lifecycle: new Set<(event: { kind: string }) => void>(),
 }));
 
+// mock-isolation: Control worker settlement and receipts without opening a pairing database.
 vi.mock("./device-pairing-worker.js", () => ({
   executeDevicePairingMutation: owner.execute,
   onDevicePairSetupChange: (listener: (path: string) => void) => {
@@ -19,12 +20,15 @@ vi.mock("./device-pairing-worker.js", () => ({
     return () => owner.changes.delete(listener);
   },
 }));
+// mock-isolation: Use synthetic admission without inspecting the user's state directory.
 vi.mock("../state/openclaw-state-worker-context.js", () => ({
   captureOpenClawStateWorkerContext: () => ({
     admission: { databasePath: "/synthetic/state.sqlite" },
   }),
 }));
+// mock-isolation: Own lifecycle notifications without registering process-global databases.
 vi.mock("../state/openclaw-state-db-cache.js", () => ({
+  registerOpenClawStateDatabaseAsyncResource: vi.fn(),
   registerOpenClawStateDatabaseLifecycleListener: (listener: (event: { kind: string }) => void) => {
     owner.lifecycle.add(listener);
     return () => owner.lifecycle.delete(listener);

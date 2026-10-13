@@ -35,6 +35,7 @@ vi.mock("./store/run-history-changes.js", () => ({
     };
   },
 }));
+// mock-isolation: Match synthetic receipt paths without resolving the user's state directory.
 vi.mock("../state/openclaw-state-db.paths.js", () => ({
   resolveOpenClawStateSqlitePath: () => "/synthetic/state.sqlite",
 }));
@@ -88,6 +89,7 @@ it.each([true])("runs retention after startup preparation, pending=%s", async (p
       expect(mocks.registry).toHaveBeenCalledOnce();
       expect(mocks.warn).not.toHaveBeenCalled();
       expect(mocks.error).not.toHaveBeenCalled();
+      expect(scheduler.nextWakeAtMs).toBeNull();
       await clock.advanceBy(60_000);
       expect(mocks.history).toHaveBeenCalledOnce();
       expect(mocks.registry).toHaveBeenCalledOnce();

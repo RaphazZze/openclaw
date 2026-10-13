@@ -763,7 +763,11 @@ describe("GitHub OAuth refresh and maintenance", () => {
         return rows;
       });
       const pending = inventory.read();
-      await awaitGateBeforeSettlement(scanned.promise, pending);
+      await awaitGateBeforeSettlement(
+        scanned.promise,
+        pending,
+        "OAuth inventory read settled before reaching the scan barrier",
+      );
       await writeGitHubOAuthRecord(oauthRecord(NEW_PROFILE));
       release.resolve();
       await pending;

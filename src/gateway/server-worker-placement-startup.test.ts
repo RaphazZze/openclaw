@@ -153,7 +153,8 @@ describe("worker placement startup health lifetime", () => {
       expect(sidecar).not.toBeNull();
       expect(reconcileActive).not.toHaveBeenCalled();
       expect(diskSpace.sweep).toHaveBeenCalledOnce();
-      // The first scheduled pass joins the background startup retirement.
+      // Settle the background startup sweep before advancing its next deadline.
+      await setImmediate();
       await time.advanceBy(60_000);
       reconcileActive.mockClear();
       diskSpace.sweep.mockClear();

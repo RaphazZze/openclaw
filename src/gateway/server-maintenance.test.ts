@@ -31,6 +31,7 @@ const cleanupManagedOutgoingMediaRecordsMock = vi.fn(async () => ({
 }));
 const startDevicePairSetupMaintenanceMock = vi.fn(async () => 0);
 
+// mock-isolation: In-memory maintenance timers must not start the device expiry worker.
 vi.mock("../infra/device-bootstrap.js", () => ({
   startDevicePairSetupMaintenance: startDevicePairSetupMaintenanceMock,
 }));

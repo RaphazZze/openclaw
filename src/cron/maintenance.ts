@@ -32,10 +32,14 @@ function scheduleSweep() {
   if (!scope || scope.signal.aborted || scheduledSweep) {
     return;
   }
+  const atMs = Math.min(nextHistorySweepAtMs, nextRegistrySweepAtMs);
+  if (!Number.isFinite(atMs)) {
+    return;
+  }
   const { signal } = scope;
   scope.schedule({
     id: "cron-maintenance",
-    atMs: Math.min(nextHistorySweepAtMs, nextRegistrySweepAtMs),
+    atMs,
     run: () =>
       (scheduledSweep ??= sweep(signal).finally(() => {
         scheduledSweep = undefined;

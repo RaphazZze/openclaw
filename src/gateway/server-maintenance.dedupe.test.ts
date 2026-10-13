@@ -21,6 +21,7 @@ const cleanupManagedOutgoingMediaRecordsMock = vi.fn(async () => ({
 }));
 const startDevicePairSetupMaintenanceMock = vi.hoisted(() => vi.fn(async () => 0));
 
+// mock-isolation: Dedupe timers must not start the unrelated device expiry worker.
 vi.mock("../infra/device-bootstrap.js", () => ({
   startDevicePairSetupMaintenance: startDevicePairSetupMaintenanceMock,
 }));

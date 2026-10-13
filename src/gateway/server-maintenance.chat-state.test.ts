@@ -9,6 +9,7 @@ import { completeQueuedChatTurn, registerQueuedChatTurn } from "./chat-queued-tu
 import { createChatAbortMarker } from "./server-chat-state.js";
 import { createGatewayMaintenanceStateForTest } from "./test-helpers.maintenance-state.js";
 
+// mock-isolation: Chat-state timers must not start the unrelated device expiry worker.
 vi.mock("../infra/device-bootstrap.js", () => ({
   startDevicePairSetupMaintenance: vi.fn(async () => 0),
 }));
