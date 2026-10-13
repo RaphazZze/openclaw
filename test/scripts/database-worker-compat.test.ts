@@ -308,16 +308,7 @@ it.each([
 });
 
 const pluginStateLegacyFile = "src/plugin-state/plugin-state-store.legacy.ts";
-const legacyStoreMethods = [
-  "register",
-  "registerIfAbsent",
-  "update",
-  "deleteIf",
-  "lookupMany",
-  "consume",
-  "delete",
-  "clear",
-];
+const legacyStoreMethods = ["lookupMany", "consume", "clear"];
 const legacyStore = `
   import { readKernel } from '../session-kernel.js';
   export type Store<T> = {
@@ -364,6 +355,24 @@ it.each([
   }
 });
 
+it("rejects shorthand method escapes from typed receivers and parameters", () => {
+  const result = inspect({
+    [kernelFile]: kernel,
+    [pluginStateLegacyFile]: legacyStore,
+    "src/consumer.ts": `
+      import { createSyncKeyedStore, type Store } from './plugin-state/plugin-state-store.legacy.js';
+      const { consume } = createSyncKeyedStore<number>();
+      consume(1);
+      export function receive({ clear }: Store<number>) { retain(clear); }
+    `,
+  });
+  expect(result.violations).toEqual([
+    expect.stringContaining("createSyncKeyedStore.consume"),
+    expect.stringContaining("createSyncKeyedStore.clear"),
+  ]);
+  expect(result.operations.has(kernelFile)).toBe(false);
+});
+
 it("keeps scalar authority and unguarded projection reads independent of guarded store members", () => {
   const result = inspect({
     [kernelFile]: kernel,
@@ -371,7 +380,8 @@ it("keeps scalar authority and unguarded projection reads independent of guarded
     "src/consumer.ts": `
       import { createSyncKeyedStore } from './plugin-state/plugin-state-store.legacy.js';
       const store = createSyncKeyedStore<number>();
-      store.lookup();
+      const { lookup } = store;
+      lookup();
       store.entries();
     `,
   });
@@ -814,6 +824,34 @@ export function ${first}() { return selectResolvedUserProfile(); }`,
   expect(result.violations).toEqual([]);
   expect(result.callLocations.get(profileFile)).toEqual(new Set(["1:53", "3:10", "3:48"]));
 });
+
+it.each(["readPluginState", "writePluginState"])(
+  "follows inline callbacks through %s but keeps escaped callbacks live",
+  (scope) => {
+    const pluginStateFile = "src/plugin-state/plugin-state-store.sqlite.ts";
+    const inspectCallback = (callback: string) =>
+      inspect(
+        {
+          [pluginStateFile]: `import { readKernel } from '../session-kernel.js';
+function ${scope}(operation, message, callback) { return callback(); }
+export function accessPluginState() {
+  return ${scope}('lookup', 'failed', ${callback});
+}`,
+          [kernelFile]: kernel,
+        },
+        `import { accessPluginState } from '../plugin-state/plugin-state-store.sqlite.js';
+/** @deprecated Use workers. */
+export function ${first}() { return accessPluginState(); }`,
+      );
+
+    const inline = inspectCallback("() => readKernel()");
+    expect(inline.violations).toEqual([]);
+    expect(inline.operations.get(kernelFile)).toEqual(new Set(["readKernel"]));
+
+    const escaped = inspectCallback("() => () => readKernel()");
+    expect(escaped.operations.has(kernelFile)).toBe(false);
+  },
+);
 
 it("does not confuse a nested function path with a live top-level namesake", () => {
   const result = inspect({

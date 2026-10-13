@@ -75,7 +75,6 @@ const reviewed = new Map<string, readonly string[]>([
     "extensions/imessage/src/conversation-bindings.ts",
     ["createIMessageConversationBindingManager"],
   ],
-  ["src/infra/outbound/session-binding-service.ts", ["inspectSessionBindingByConversation"]],
   ["src/channels/plugins/binding-routing.ts", ["resolveRuntimeConversationBindingRoute"]],
   ["extensions/matrix/auth-presence.ts", ["hasAnyMatrixAuth"]],
   [
@@ -138,19 +137,10 @@ const reviewedMembers = new Map<string, readonly string[]>([
   [
     "src/plugin-state/plugin-state-store.legacy.ts",
     [
-      "createSyncKeyedStore.register",
-      "createSyncKeyedStore.registerIfAbsent",
-      "createSyncKeyedStore.update",
-      "createSyncKeyedStore.deleteIf",
       "createSyncKeyedStore.lookupMany",
       "createSyncKeyedStore.consume",
-      "createSyncKeyedStore.delete",
       "createSyncKeyedStore.clear",
     ],
-  ],
-  [
-    "src/plugin-state/plugin-state-store.ts",
-    ["createKeyedStoreForPluginId.update", "createKeyedStoreForPluginId.deleteIf"],
   ],
 ]);
 
@@ -253,6 +243,13 @@ const synchronousScopes = new Map<string, ReadonlyMap<string, number>>([
   [
     "src/config/sessions/session-accessor.sqlite-participants.native.ts",
     new Map([["recordSessionParticipantWithAliasRead", 2]]),
+  ],
+  [
+    "src/plugin-state/plugin-state-store.sqlite.ts",
+    new Map([
+      ["readPluginState", 2],
+      ["writePluginState", 2],
+    ]),
   ],
   [
     "src/state/openclaw-state-db-readonly.ts",
@@ -922,7 +919,11 @@ export function inspectDatabaseWorkerBoundaries(
             !selectsImportMember(node.parent))) &&
         !declarationNames.has(node) &&
         !declarations.has(node.parent) &&
-        !(ts.isBindingElement(node.parent) && node.parent.name === node) &&
+        !(
+          ts.isBindingElement(node.parent) &&
+          node.parent.name === node &&
+          (node.parent.propertyName || !ts.isObjectBindingPattern(node.parent.parent))
+        ) &&
         !(ts.isVariableDeclaration(node.parent) && node.parent.name === node)
       ) {
         references.push(node);
@@ -932,10 +933,19 @@ export function inspectDatabaseWorkerBoundaries(
     source.forEachChild(visit);
     const symbols = checker.getSymbolAtLocation(references);
     for (const [index, node] of references.entries()) {
+      const bindingMember =
+        ts.isIdentifier(node) &&
+        ts.isBindingElement(node.parent) &&
+        node.parent.name === node &&
+        !node.parent.propertyName &&
+        ts.isObjectBindingPattern(node.parent.parent)
+          ? checker.getTypeAtLocation(node.parent.parent).getProperty(node.text)
+          : undefined;
       let symbol = resolveSymbol(
-        ts.isShorthandPropertyAssignment(node.parent)
-          ? checker.getShorthandAssignmentValueSymbol(node.parent)
-          : symbols[index],
+        bindingMember ??
+          (ts.isShorthandPropertyAssignment(node.parent)
+            ? checker.getShorthandAssignmentValueSymbol(node.parent)
+            : symbols[index]),
       );
       if (!symbol && ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) {
         symbol = resolveSymbol(accessSymbol(node.parent));
