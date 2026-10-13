@@ -314,9 +314,9 @@ test.each(["generator error", "delayed title"])(
       expect(created.ok, JSON.stringify(created.error)).toBe(true);
       expect(created.payload?.runStarted).toBe(true);
       await waitForPreparation(dispatchStarted.promise);
+      await waitForPreparation(titleStarted.promise);
       const branch = loadSessionEntry(target)?.worktree?.branch;
       expect(branch).toMatch(/^openclaw\/[a-z]+-[a-z]+$/);
-      await titleStarted.promise;
       expect(titleMocks.generate).toHaveBeenCalledOnce();
       dispatchFinished.resolve();
       await settleWorkspaceRuns(context, storePath, key);
