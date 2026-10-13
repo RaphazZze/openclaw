@@ -532,7 +532,7 @@ it.each(["tokens", "cost"] as const)(
     const rows = ["first", "second"].map((key, index) => ({
       key,
       agentId: "main",
-      usage: summaries[index],
+      usage: summaries[index] ?? null,
     }));
     const options = {
       selectedDays: ["2026-02-01"],

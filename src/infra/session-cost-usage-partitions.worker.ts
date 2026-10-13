@@ -4,7 +4,6 @@ import { expressionBuilder } from "kysely";
 import type { DB } from "../state/openclaw-agent-db.generated.js";
 import { chunkItems } from "../utils/chunk-items.js";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "./kysely-sync.js";
-import type { SessionCostUsageRollupRow } from "./session-cost-usage-cache.kernel.js";
 import {
   USAGE_COST_PARTITION_SCOPE,
   usageCostPartitionKey,
@@ -130,7 +129,7 @@ export function readSessionCostUsagePartitionsInDatabase(
 
 export function readSessionCostUsageRollupWithPartitionsInDatabase(
   db: DatabaseSync,
-  snapshot: SessionCostUsageRollupRow,
+  snapshot: { key: string; updatedAt: number; valueJson: string },
 ): { blob: Uint8Array | null; partitions: UsageCostPartition[] } | undefined {
   assertUsagePartitionWorker();
   // Refresh yields before this read; a replacement's partitions cannot join the old checkpoint.
