@@ -4,12 +4,18 @@ import {
   AgentHarnessPreflightError,
   agentHarnessAttemptTerminal,
   clearActiveEmbeddedRun,
+  execPolicy,
   setActiveEmbeddedRun,
   type AgentHarnessAttemptParamsV2,
   type AgentHarnessAttemptResult,
   type AgentHarnessV2,
   type AgentMessage,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import { createNativeSessionCommitFinalizer } from "openclaw/plugin-sdk/agent-harness-session-runtime";
+import {
+  resolveAgentConfig,
+  resolveSessionAgentIdsStrict,
+} from "openclaw/plugin-sdk/agent-scope-runtime";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { KeyedAsyncQueue } from "openclaw/plugin-sdk/keyed-async-queue";
 import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
@@ -23,6 +29,8 @@ import {
 import { createApprovalHandler } from "./src/approvals.js";
 import { consumeTurn } from "./src/events.js";
 import { credentialFingerprint, MusePool, openMuseSession } from "./src/runtime.js";
+
+type MuseInputPart = Parameters<Session["sendUserTurn"]>[0]["input"][number];
 
 export type MuseSessionBinding = { sessionId: string; compatibility: string };
 export type MuseHarnessOptions = {
@@ -95,8 +103,24 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
       params.hostCapabilities.assertActive();
       const workspace = await realpath(params.workspaceDir);
       params.hostCapabilities.assertActive();
-      const security = params.execOverrides?.security ?? params.config?.tools?.exec?.security;
-      const ask = params.execOverrides?.ask ?? params.config?.tools?.exec?.ask;
+      const { sessionAgentId } = resolveSessionAgentIdsStrict({
+        sessionKey: params.sessionKey,
+        config: params.config,
+        agentId: params.agentId,
+      });
+      const agentExec = resolveAgentConfig(
+        params.config ?? {},
+        params.sandboxAgentId ?? sessionAgentId,
+      )?.tools?.exec;
+      let policy = execPolicy.resolveExecModePolicy({ security: "full", ask: "on-miss" });
+      for (const layer of [params.config?.tools?.exec, agentExec, params.execOverrides]) {
+        policy = execPolicy.resolveExecModePolicy({
+          mode: layer?.mode,
+          security: layer?.security ?? policy.security,
+          ask: layer?.ask ?? policy.ask,
+        });
+      }
+      const { security, ask } = policy;
       if (security === "allowlist") {
         throw museRefusal(
           "Muse cannot enforce OpenClaw's exec allowlist. Use the openclaw runtime.",
@@ -132,6 +156,7 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
       let failure: unknown;
       const messages: AgentMessage[] = [];
       let text = "";
+      let lastToolError: AgentHarnessAttemptResult["lastToolError"];
       let assistantTranscriptOwned = false;
       let finalKey: string | undefined;
       const bound = params.hostCapabilities.bindModelExecution?.({
@@ -160,9 +185,16 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
             void runtime.close();
           }, 5000);
           forceCloseTimer.unref();
-          abortPromise = runtime.host.connection
-            .command("turn/interrupt", { sessionId: session.sessionId, turnId: turn.turnId })
-            .then(() => undefined);
+          const nativeTurn = turn;
+          abortPromise = (async () => {
+            await runtime.host.connection
+              .command("turn/interrupt", {
+                sessionId: session.sessionId,
+                turnId: nativeTurn.turnId,
+              })
+              .catch(() => runtime.close());
+            await nativeTurn.completed;
+          })();
         }
         await abortPromise;
       };
@@ -238,13 +270,18 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         await params.userTurnTranscriptRecorder?.persistApproved();
         assertDispatchActive();
         // MSP has no system/developer instruction field; preserve host context in user input.
-        const input = [
+        const input: MuseInputPart[] = [
           {
-            type: "text" as const,
+            type: "text",
             text: params.extraSystemPrompt
               ? `${params.extraSystemPrompt}\n\n${params.prompt}`
               : params.prompt,
           },
+          ...(params.images ?? []).map((image): MuseInputPart => ({
+            type: "image",
+            mediaType: image.mimeType,
+            base64Data: image.data,
+          })),
         ];
         turn = await session.sendUserTurn({
           input,
@@ -285,6 +322,7 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
           assistantTranscriptOwned = finalKey !== undefined;
         });
         text = result.visibleText;
+        lastToolError = result.lastToolError;
         if (result.outcome.kind !== "completed") {
           throw new Error(`Muse turn ended without a terminal result (${result.outcome.kind}).`);
         }
@@ -305,10 +343,11 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         }
       } catch (error) {
         failure ??= error;
-        if (turn && !aborted) {
+        if (turn) {
           await stop().catch(() => undefined);
         }
       } finally {
+        await abortPromise?.catch(() => undefined);
         clearTimeout(timer);
         clearTimeout(forceCloseTimer);
         signal?.removeEventListener("abort", onAbort);
@@ -351,6 +390,7 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         assistantTranscriptOwned,
         assistantTranscriptIdempotencyKey: finalKey,
         toolMetas,
+        lastToolError,
         cloudCodeAssistFormatError: false,
         didSendViaMessagingTool: false,
         itemLifecycle: {
@@ -402,6 +442,27 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
             reason: "Muse requires an explicit muse runtime and Meta's official API endpoint.",
           },
     runAttempt,
+    async withSessionContextReset(params, run) {
+      params.assertCurrent();
+      await active.get(params.sessionId)?.();
+      return queue.enqueue(params.sessionId, async () => {
+        params.assertCurrent();
+        let committed = false;
+        const result = await run(
+          createNativeSessionCommitFinalizer({
+            commit: () => {
+              committed = true;
+            },
+            rollback: () => undefined,
+          }),
+        );
+        if (committed) {
+          params.assertCurrent();
+          await options.sessionStore.delete(params.sessionId);
+        }
+        return result;
+      });
+    },
     async reset(params) {
       const sessionId = params.sessionId;
       if (!sessionId) {

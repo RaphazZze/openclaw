@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -148,6 +148,187 @@ describe("Muse native MSP harness", () => {
       await resumed.dispose?.();
     }
   });
+
+  it.each([
+    ["global mode", { config: { tools: { exec: { mode: "deny" } } } }],
+    ["override mode", { execOverrides: { mode: "deny" } }],
+    [
+      "agent policy",
+      {
+        config: {
+          tools: { exec: { mode: "full" } },
+          agents: { list: [{ id: "main", tools: { exec: { mode: "deny" } } }] },
+        },
+      },
+    ],
+  ] satisfies Array<[string, Partial<AgentHarnessAttemptParamsV2>]>)(
+    "launches a read-only host for %s",
+    async (_name, policy) => {
+      const { harness, params } = setup();
+      const log = join(workspace, `${params.runId}.jsonl`);
+      vi.stubEnv("MUSE_REQUEST_LOG", log);
+      try {
+        await harness.runAttempt({ ...params, ...policy });
+        const requests = (await readFile(log, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
+        expect(requests).toContainEqual(
+          expect.objectContaining({
+            event: "spawn",
+            args: ["serve", "--disable-shell", "--disable-write"],
+          }),
+        );
+        expect(requests).toContainEqual(
+          expect.objectContaining({
+            method: "session/start",
+            params: expect.objectContaining({ approvalMode: "denyUnmatched" }),
+          }),
+        );
+      } finally {
+        await harness.dispose?.();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it("forwards prepared images to the native turn", async () => {
+    const { harness, params } = setup();
+    const log = join(workspace, `${params.runId}.jsonl`);
+    vi.stubEnv("MUSE_REQUEST_LOG", log);
+    try {
+      await harness.runAttempt({
+        ...params,
+        images: [{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }],
+      });
+      const requests = (await readFile(log, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(requests).toContainEqual(
+        expect.objectContaining({
+          method: "turn/start",
+          params: expect.objectContaining({
+            input: [
+              { type: "text", text: "hello" },
+              { type: "image", mediaType: "image/png", base64Data: "aW1hZ2U=" },
+            ],
+          }),
+        }),
+      );
+    } finally {
+      await harness.dispose?.();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("returns the terminal observer's unresolved native tool error", async () => {
+    const { harness, params } = setup();
+    const lastToolError = { toolName: "read_file", error: "file unavailable" };
+    const observeToolTerminal: NonNullable<AgentHarnessAttemptParamsV2["observeToolTerminal"]> =
+      vi.fn(() => ({ lastToolError, executionStarted: true, sideEffectEvidence: false }));
+    try {
+      const result = await harness.runAttempt({
+        ...params,
+        prompt: "tool-failure",
+        observeToolTerminal,
+      });
+      expect(observeToolTerminal).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "failure" }),
+      );
+      expect(result.terminal.kind).toBe("ok");
+      expect(result.lastToolError).toEqual(lastToolError);
+    } finally {
+      await harness.dispose?.();
+    }
+  });
+
+  it.each(["callback", "transcript", "abort", "timeout", "approval"] as const)(
+    "waits for native settlement after %s interruption",
+    async (failure) => {
+      const { harness, params } = setup();
+      const log = join(workspace, `${params.runId}.jsonl`);
+      vi.stubEnv("MUSE_REQUEST_LOG", log);
+      const controller = new AbortController();
+      if (failure === "transcript") {
+        writes.append.mockRejectedValueOnce(new Error("transcript unavailable"));
+      }
+      if (failure === "approval") {
+        params.hostCapabilities = {
+          ...params.hostCapabilities,
+          requestApproval: async () => {
+            throw new Error("approval gateway unavailable");
+          },
+        };
+      }
+      try {
+        const result = await harness.runAttempt({
+          ...params,
+          prompt: failure === "approval" ? "approval-settle" : "settle",
+          timeoutMs: failure === "timeout" ? 150 : params.timeoutMs,
+          abortSignal: controller.signal,
+          onExecutionStarted: () => {
+            if (failure === "callback") {
+              throw new Error("callback failed");
+            }
+            if (failure === "abort") {
+              controller.abort();
+            }
+          },
+        });
+        expect(result.terminal.kind).toBe(
+          failure === "abort" ? "aborted" : failure === "timeout" ? "timeout" : "failed",
+        );
+        expect(await readFile(log, "utf8")).toContain('"event":"terminal","terminal":"cancelled"');
+      } finally {
+        await harness.dispose?.();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it.each([true, false])(
+    "invalidates context only after a committed history mutation (%s)",
+    async (commit) => {
+      const { harness, params, bindings, sessionStore } = setup();
+      try {
+        await harness.runAttempt(params);
+        const reset = harness.withSessionContextReset!;
+        const operation = reset(
+          {
+            agentId: "main",
+            sessionId: params.sessionId,
+            sessionKey: params.sessionKey!,
+            assertCurrent: () => undefined,
+          },
+          async (mutation) => {
+            if (!commit) {
+              throw new Error("history mutation failed");
+            }
+            mutation.commit();
+            return "committed";
+          },
+        );
+        if (commit) {
+          await expect(operation).resolves.toBe("committed");
+          expect(bindings.has(params.sessionId)).toBe(false);
+        } else {
+          await expect(operation).rejects.toThrow("history mutation failed");
+          expect(bindings.has(params.sessionId)).toBe(true);
+        }
+        await harness.dispose?.();
+        const restarted = createMuseAgentHarness({ binaryPath: fixture, sessionStore });
+        try {
+          const next = await restarted.runAttempt(params);
+          expect(next.assistantTexts).toEqual([commit ? "started: hello" : "resumed: hello"]);
+        } finally {
+          await restarted.dispose?.();
+        }
+      } finally {
+        await harness.dispose?.();
+      }
+    },
+  );
 
   it.each([
     ["off", "minimal"],

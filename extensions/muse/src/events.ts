@@ -2,6 +2,7 @@ import type { FoldedItem, Turn } from "@muse-code/sdk";
 import {
   projectAgentToolActivity,
   type AgentHarnessAttemptParamsV2,
+  type AgentHarnessAttemptResult,
   type AgentMessage,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
@@ -42,6 +43,7 @@ export async function consumeTurn(
   const emitted = new Map<string, number>();
   const settled = new Set<string>();
   let visibleText = "";
+  let lastToolError: AgentHarnessAttemptResult["lastToolError"];
   let messageStarted = false;
   let streamQueue = Promise.resolve();
   const emitField = (item: FoldedItem, field: string, value: string) => {
@@ -130,7 +132,7 @@ export async function consumeTurn(
           isError: item.status !== "completed",
           timestamp: Date.now(),
         });
-        params.observeToolTerminal?.({
+        const resolution = params.observeToolTerminal?.({
           toolCallId: id,
           toolName,
           arguments: args,
@@ -139,6 +141,7 @@ export async function consumeTurn(
           executionStarted: true,
           nativeMutation: { mutatingAction: true, replaySafe: false },
         });
+        lastToolError = resolution?.lastToolError;
         params.onAgentToolResult?.({
           toolName,
           result: item.visibleOutput,
@@ -182,5 +185,5 @@ export async function consumeTurn(
     }
   })();
   await Promise.all([projections, deltas]);
-  return { visibleText, outcome: await turn.completed };
+  return { visibleText, lastToolError, outcome: await turn.completed };
 }

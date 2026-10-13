@@ -127,11 +127,15 @@ Muse's reasoning effort: `off` becomes `minimal` (Muse Spark does not accept
 `none`), and `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`
 pass through. `adaptive` is refused because Muse has no adaptive mode.
 
+Prepared image attachments are forwarded to Muse as native MSP image input,
+including their media type and base64 payload.
+
 ## Approvals and sandbox
 
-The harness maps OpenClaw's exec policy (`tools.exec.security` and
-`tools.exec.ask`, or per-session exec overrides) to Muse's approval mode and
-sandbox posture:
+The harness resolves `tools.exec.mode`, legacy `security`/`ask` settings,
+agent-specific settings, and per-session exec overrides in that order.
+Explicit modes replace legacy fields in the same layer. The effective policy
+maps to Muse's approval mode and sandbox posture:
 
 | OpenClaw exec policy                 | Muse behavior                                                                                 |
 | ------------------------------------ | --------------------------------------------------------------------------------------------- |
@@ -175,6 +179,12 @@ in use or overloaded, fail the turn instead, so a turn that may still be
 running is never repeated.
 
 `/new` and `/reset` stop an active Muse turn and delete the binding.
+Rewinding or switching branches within the same OpenClaw session also
+invalidates the binding, but only after the history change commits.
+
+Stopping a turn waits for Muse's terminal event, not just its interrupt
+acknowledgement. If Muse does not settle within five seconds, the harness
+closes the host before releasing the attempt.
 
 `muse serve` processes are pooled per workspace, credential, and read-only
 posture, and shut down after five idle minutes.

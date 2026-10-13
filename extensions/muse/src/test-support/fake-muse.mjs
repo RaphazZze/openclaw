@@ -32,6 +32,12 @@ function item(kind, text, status = "completed", extra = {}) {
   };
 }
 function complete(terminal, error) {
+  if (process.env.MUSE_REQUEST_LOG) {
+    appendFileSync(
+      process.env.MUSE_REQUEST_LOG,
+      `${JSON.stringify({ event: "terminal", terminal })}\n`,
+    );
+  }
   event("turn/completed", { ...active, terminal, sourceRange, ...(error ? { error } : {}) });
 }
 function answer() {
@@ -48,10 +54,10 @@ function answer() {
     item: { ...reasoning, status: "completed", revision: 2, summary: ["Considering"] },
     sourceRange,
   });
-  if (active.prompt === "tool") {
+  if (active.prompt === "tool" || active.prompt === "tool-failure") {
     event("item/completed", {
       ...active,
-      item: item("toolCall", undefined, "completed", {
+      item: item("toolCall", undefined, active.prompt === "tool-failure" ? "failed" : "completed", {
         tool: "read_file",
         callId: "call-1",
         args: '{"path":"a.txt"}',
@@ -75,7 +81,9 @@ function answer() {
     item: { ...message, text, status: "completed", revision: 2 },
     sourceRange,
   });
-  complete("completed");
+  if (active.prompt !== "settle") {
+    complete("completed");
+  }
 }
 createInterface({ input: process.stdin }).on("line", (line) => {
   if (process.env.MUSE_REQUEST_LOG) {
@@ -166,7 +174,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           message: "not logged in: run /login to add an API key",
           retryable: false,
         });
-      } else if (active.prompt === "approval") {
+      } else if (active.prompt === "approval" || active.prompt === "approval-settle") {
         event("approval/requested", {
           ...active,
           // Real Muse mints one approval id per request; the SDK ignores repeats.
@@ -199,7 +207,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     }
   } else if (method === "turn/interrupt") {
     reply(id, { commandId: params.commandId, status: "accepted" });
-    complete("cancelled");
+    if (active.prompt === "settle" || active.prompt === "approval-settle") {
+      // Deliberately separate admission from native settlement.
+      setTimeout(() => complete("cancelled"), 80);
+    } else {
+      complete("cancelled");
+    }
   } else {
     send({ id, error: { code: -32601, message: `Unsupported fixture method ${method}` } });
   }
