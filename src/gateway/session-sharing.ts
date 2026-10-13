@@ -604,6 +604,10 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
     ...(chatTarget && withCurrentSessionSource
       ? {
           withCurrent: async <T>(consume: () => T): Promise<T> => {
+            const pending = params.preparedTargets?.flatMap((target) => target.prepareRead() ?? []);
+            if (pending?.length) {
+              await Promise.all(pending);
+            }
             if (
               params.preparedTargets ||
               (chatTarget.projection &&

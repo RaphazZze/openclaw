@@ -162,6 +162,7 @@ export async function resolveSessionMutationAuthorizationAsync(
         readSource,
         bindCreation: retained.bindCreation,
         followRegistration: retained.followRegistration,
+        prepareRead: retained.prepareRead,
         read: () => {
           const facts = readCurrent();
           return {
@@ -295,6 +296,7 @@ export async function resolveSessionMutationAuthorizationAsync(
               target.storageTarget.agentId === created.agentId,
           );
           if (selected) {
+            selected.prepareRead = retained.prepareRead;
             selected.read = read;
             selected.readSource = created.readSource ?? selected.readSource;
           } else {
@@ -307,6 +309,7 @@ export async function resolveSessionMutationAuthorizationAsync(
                 storePath: created.storePath,
               },
               readSource: created.readSource,
+              prepareRead: retained.prepareRead,
               read,
               bindCreation: () => {},
             });
