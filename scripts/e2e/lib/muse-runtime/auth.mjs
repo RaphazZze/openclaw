@@ -14,6 +14,7 @@ async function login() {
     const output = { stdout: "", stderr: "" };
     let announced = false;
     let settled = false;
+    /** @param {Error | undefined} error */
     const finish = (error) => {
       if (settled) {
         return;

@@ -2,7 +2,11 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentHarnessAttemptParamsV2 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import type {
+  AgentHarnessAttemptParamsV2,
+  AgentHarnessAttemptResult,
+} from "openclaw/plugin-sdk/agent-harness-runtime";
+import { AuthStorage, ModelRegistry } from "openclaw/plugin-sdk/agent-sessions";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createMuseAgentHarness, type MuseSessionBinding } from "./harness.js";
 import { selectApprovalChoice, type MuseApprovalRequest } from "./src/approvals.js";
@@ -38,12 +42,13 @@ function setup() {
       bindings.set(key, value);
     },
     delete: async (key: string) => {
-      bindings.delete(key);
+      return bindings.delete(key);
     },
   };
   const harness = createMuseAgentHarness({ binaryPath: fixture, sessionStore });
   const events: Array<{ stream: string; data: Record<string, unknown> }> = [];
-  const params = {
+  const authStorage = AuthStorage.inMemory();
+  const params: AgentHarnessAttemptParamsV2 = {
     runId: crypto.randomUUID(),
     sessionId: crypto.randomUUID(),
     sessionKey: "agent:main:muse-test",
@@ -51,7 +56,21 @@ function setup() {
     agentDir: workspace,
     provider: "meta",
     modelId: "muse-spark-1.3",
-    model: { id: "muse-spark-1.3", provider: "meta", api: "openai-responses" },
+    model: {
+      id: "muse-spark-1.3",
+      name: "Muse Spark",
+      provider: "meta",
+      api: "openai-responses",
+      baseUrl: "https://api.meta.ai/v1",
+      reasoning: true,
+      input: ["text", "image"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128_000,
+      maxTokens: 8192,
+    },
+    authStorage,
+    modelRegistry: ModelRegistry.inMemory(authStorage),
+    thinkLevel: "off",
     sessionFile: join(workspace, "session.jsonl"),
     timeoutMs: 10_000,
     prompt: "hello",
@@ -68,13 +87,20 @@ function setup() {
       kind: "agent-harness-host-capability",
       version: 1,
       assertActive: () => undefined,
-      bindToolSurface: (tools: unknown[]) => tools,
-      runBeforeToolCall: async () => ({ blocked: false }),
+      bindToolSurface: (tools) => tools,
+      runBeforeToolCall: async (request) => ({ blocked: false, params: request.params }),
       requestApproval: vi.fn(async () => ({ decision: "allow-once" as const })),
       waitForApproval: vi.fn(async () => undefined),
     },
-  } as AgentHarnessAttemptParamsV2;
+  };
   return { harness, params, events, sessionStore, bindings };
+}
+
+function terminal(result: AgentHarnessAttemptResult) {
+  if (!("terminal" in result)) {
+    throw new Error("Muse must return a canonical attempt terminal.");
+  }
+  return result.terminal;
 }
 
 describe("Muse native MSP harness", () => {
@@ -107,7 +133,7 @@ describe("Muse native MSP harness", () => {
     const first = setup();
     try {
       const result = await first.harness.runAttempt({ ...first.params, prompt: "tool" });
-      expect(result.terminal.kind).toBe("ok");
+      expect(terminal(result).kind).toBe("ok");
       expect(result.assistantTexts).toEqual(["started: hello"]);
       expect(
         first.events
@@ -140,7 +166,7 @@ describe("Muse native MSP harness", () => {
     });
     try {
       const result = await resumed.runAttempt(first.params);
-      expect(result.terminal.kind).toBe("ok");
+      expect(terminal(result).kind).toBe("ok");
       expect(result.assistantTexts).toEqual(["resumed: hello"]);
       const changed = await resumed.runAttempt({ ...first.params, modelId: "muse-other" });
       expect(changed.assistantTexts).toEqual(["started: hello"]);
@@ -157,7 +183,7 @@ describe("Muse native MSP harness", () => {
       {
         config: {
           tools: { exec: { mode: "full" } },
-          agents: { list: [{ id: "main", tools: { exec: { mode: "deny" } } }] },
+          agents: { entries: { main: { tools: { exec: { mode: "deny" } } } } },
         },
       },
     ],
@@ -225,8 +251,14 @@ describe("Muse native MSP harness", () => {
   it("returns the terminal observer's unresolved native tool error", async () => {
     const { harness, params } = setup();
     const lastToolError = { toolName: "read_file", error: "file unavailable" };
-    const observeToolTerminal: NonNullable<AgentHarnessAttemptParamsV2["observeToolTerminal"]> =
-      vi.fn(() => ({ lastToolError, executionStarted: true, sideEffectEvidence: false }));
+    const observeToolTerminal = vi.fn<
+      NonNullable<AgentHarnessAttemptParamsV2["observeToolTerminal"]>
+    >(() => ({
+      lastToolError,
+      executionStarted: true,
+      sideEffectEvidence: false,
+      effectReceipt: { state: "failed_no_effect" },
+    }));
     try {
       const result = await harness.runAttempt({
         ...params,
@@ -236,7 +268,7 @@ describe("Muse native MSP harness", () => {
       expect(observeToolTerminal).toHaveBeenCalledWith(
         expect.objectContaining({ outcome: "failure" }),
       );
-      expect(result.terminal.kind).toBe("ok");
+      expect(terminal(result).kind).toBe("ok");
       expect(result.lastToolError).toEqual(lastToolError);
     } finally {
       await harness.dispose?.();
@@ -276,7 +308,7 @@ describe("Muse native MSP harness", () => {
             }
           },
         });
-        expect(result.terminal.kind).toBe(
+        expect(terminal(result).kind).toBe(
           failure === "abort" ? "aborted" : failure === "timeout" ? "timeout" : "failed",
         );
         expect(await readFile(log, "utf8")).toContain('"event":"terminal","terminal":"cancelled"');
@@ -374,11 +406,11 @@ describe("Muse native MSP harness", () => {
         sessionKey: "agent:main:second-muse",
         abortSignal: secondController.signal,
       });
-      expect(second.terminal.kind).toBe("aborted");
+      expect(terminal(second).kind).toBe("aborted");
       firstController.abort();
       const result = await first;
-      expect(result.terminal).toMatchObject({ kind: "aborted" });
-      expect(result.terminal).not.toHaveProperty("failure");
+      expect(terminal(result)).toMatchObject({ kind: "aborted" });
+      expect(terminal(result)).not.toHaveProperty("failure");
     } finally {
       firstController.abort();
       await first;
@@ -393,7 +425,7 @@ describe("Muse native MSP harness", () => {
       expect(params.hostCapabilities.requestApproval).toHaveBeenCalledWith(
         expect.objectContaining({ toolName: "shell", allowedDecisions: ["allow-once", "deny"] }),
       );
-      expect(result.terminal.kind).toBe("ok");
+      expect(terminal(result).kind).toBe("ok");
       expect(result.assistantTexts).toEqual(["started: hello"]);
     } finally {
       await harness.dispose?.();
@@ -411,7 +443,7 @@ describe("Muse native MSP harness", () => {
         abortSignal: controller.signal,
         onExecutionStarted,
       });
-      expect(result.terminal.kind).toBe("aborted");
+      expect(terminal(result).kind).toBe("aborted");
     } finally {
       await harness.dispose?.();
     }
@@ -424,7 +456,7 @@ describe("Muse native MSP harness", () => {
     const { harness, params } = setup();
     try {
       const result = await harness.runAttempt({ ...params, prompt });
-      expect(result.terminal).toMatchObject({
+      expect(terminal(result)).toMatchObject({
         kind: "failed",
         error: expect.objectContaining({ message: expect.stringContaining(expected) }),
       });
@@ -456,7 +488,7 @@ describe("Muse native MSP harness", () => {
       });
       try {
         const result = await next.runAttempt(state.params);
-        expect(result.terminal.kind).toBe("ok");
+        expect(terminal(result).kind).toBe("ok");
         expect(result.assistantTexts).toEqual(["started: hello"]);
         expect(warn).toHaveBeenCalledWith(expect.stringContaining("started a new Muse session"));
       } finally {
@@ -477,7 +509,7 @@ describe("Muse native MSP harness", () => {
     const next = createMuseAgentHarness({ binaryPath: fixture, sessionStore: state.sessionStore });
     try {
       const result = await next.runAttempt(state.params);
-      expect(result.terminal).toMatchObject({
+      expect(terminal(result)).toMatchObject({
         kind: "failed",
         error: expect.objectContaining({ message: expect.stringContaining("sessionInUse") }),
       });
@@ -495,7 +527,7 @@ describe("Muse native MSP harness", () => {
     };
     try {
       const result = await harness.runAttempt({ ...params, prompt: "approval" });
-      expect(result.terminal).toMatchObject({
+      expect(terminal(result)).toMatchObject({
         kind: "failed",
         error: expect.objectContaining({ message: expect.stringContaining("denied") }),
       });
@@ -515,7 +547,7 @@ describe("Muse native MSP harness", () => {
     };
     try {
       const result = await harness.runAttempt({ ...params, prompt: "approval" });
-      expect(result.terminal).toMatchObject({
+      expect(terminal(result)).toMatchObject({
         kind: "failed",
         error: expect.objectContaining({
           message: expect.stringContaining("approval gateway unavailable"),
@@ -532,7 +564,7 @@ describe("Muse native MSP harness", () => {
     const harness = createMuseAgentHarness({ binaryPath: fixture, sessionStore, logger: { warn } });
     try {
       const result = await harness.runAttempt({ ...params, prompt: "loggedout" });
-      expect(result.terminal).toMatchObject({
+      expect(terminal(result)).toMatchObject({
         kind: "failed",
         error: expect.objectContaining({ message: expect.stringContaining("muse login") }),
       });
@@ -552,7 +584,7 @@ describe("Muse native MSP harness", () => {
         prompt: "approval",
         timeoutMs: 2 ** 31,
       });
-      expect(result.terminal).toMatchObject({ kind: "ok" });
+      expect(terminal(result)).toMatchObject({ kind: "ok" });
       expect(params.hostCapabilities.requestApproval).toHaveBeenCalledWith(
         expect.objectContaining({ timeoutMs: 120_000 }),
       );

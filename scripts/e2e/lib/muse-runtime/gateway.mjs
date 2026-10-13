@@ -139,7 +139,7 @@ export async function createHarness() {
     );
     const history = await client.request("chat.history", { sessionKey, limit: 100 });
     if (approvalFailure) {
-      throw approvalFailure;
+      throw new Error("Approval resolution failed", { cause: approvalFailure });
     }
     const assistant = history.messages.findLast((item) => item.role === "assistant");
     const text =
