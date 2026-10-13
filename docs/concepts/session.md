@@ -373,10 +373,11 @@ only retention and protection metadata before entering the foreground write queu
 cap selection retains only the required oldest eligible entries. The writer rechecks the selected rows and their protection before applying
 changes, so concurrent updates are reconsidered instead of overwritten. Activity
 on unrelated sessions and protection that has ended do not invalidate the plan.
-When an over-cap pass finds only protected entries, ordinary activity does not
+When an over-cap pass finds only durably protected entries, ordinary activity does not
 repeat that futile plan. New eligible entries, restored identities, lost entry
-protection, and changed policy reconsider it; age deadlines and the periodic
-recheck still cover protection held by runtime providers.
+protection, and changed policy reconsider it. Temporary protection from active
+sessions, runtime providers, or recent activity does not suppress planning on
+ordinary writes; age deadlines and the periodic recheck still resume idle cleanup.
 If writes invalidate an automatic maintenance plan, its replacement waits for
 a quiet window after the last write (one second, then two seconds). Three
 consecutive invalidations pause automatic retries and log the cause; a new

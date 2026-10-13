@@ -176,9 +176,9 @@ it.each(["unlock", "insert", "policy"] as const)(
     request.maintenanceConfig.maxEntries = 2;
     const protectedKey = "agent:main:protected-cap";
     runOpenClawAgentWriteTransaction((owner) => {
-      for (const key of [protectedKey, "agent:main:protected-other"]) {
+      for (const key of [sessionKey, protectedKey, "agent:main:protected-other"]) {
         writeSessionEntry(owner, key, {
-          sessionId: key,
+          sessionId: key === sessionKey ? "age-kick" : key,
           updatedAt,
           modelSelectionLocked: true,
         });
@@ -194,6 +194,7 @@ it.each(["unlock", "insert", "policy"] as const)(
           sessionId: "age-kick",
           updatedAt,
           label: `activity-${index}`,
+          modelSelectionLocked: true,
         });
       }, scope);
       kickSessionEntryMaintenanceAfterWrite(request);
@@ -220,6 +221,52 @@ it.each(["unlock", "insert", "policy"] as const)(
     }
   },
 );
+
+it("resumes an over-cap pass on ordinary activity after runtime protection releases", async ({
+  signal,
+}) => {
+  const { request, scope, storePath, updatedAt } = createStore(86_400_000);
+  request.maintenanceConfig.maxEntries = 1;
+  const victimKey = "agent:main:runtime-protected-cap";
+  runOpenClawAgentWriteTransaction((owner) => {
+    writeSessionEntry(owner, sessionKey, {
+      sessionId: "age-kick",
+      updatedAt,
+      modelSelectionLocked: true,
+    });
+    writeSessionEntry(owner, victimKey, { sessionId: "runtime-victim", updatedAt });
+  }, scope);
+  let keys = [victimKey];
+  const unregister = registerSessionMaintenancePreserveKeysProvider(async () => ({
+    capture: () => keys,
+    dispose() {},
+  }));
+  try {
+    const settled = observeNextPeriodicMaintenance();
+    kickSessionEntryMaintenanceAfterWrite(request);
+    await settled(signal);
+    expect(loadSessionEntry({ sessionKey: victimKey, storePath })?.archivedAt).toBeUndefined();
+    keys = [];
+    runOpenClawAgentWriteTransaction((owner) => {
+      writeSessionEntry(owner, sessionKey, {
+        sessionId: "age-kick",
+        updatedAt,
+        modelSelectionLocked: true,
+        label: "ordinary activity",
+      });
+    }, scope);
+    kickSessionEntryMaintenanceAfterWrite(request);
+    await yieldToEventLoop();
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect(loadSessionEntry({ sessionKey: victimKey, storePath })?.archiveReason).toBe(
+      "active-session-cap",
+    );
+    expect(loadSessionEntry({ sessionKey, storePath })?.archivedAt).toBeUndefined();
+  } finally {
+    await agentDatabase.closeOpenClawAgentDatabasesAsync();
+    unregister();
+  }
+});
 
 it.each(["before immediate"] as const)(
   "stops automatic maintenance when Gateway drain starts %s",

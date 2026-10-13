@@ -199,6 +199,7 @@ export function prepareSessionEntryMaintenanceInDatabase(
     NonNullable<SessionEntryMaintenancePlan["entryRemovals"][number]["maintenanceReason"]>
   >();
   const archivedKeys = new Set<string>();
+  let durableNoCandidates = false;
   let preserveKeys: ReadonlySet<string> | undefined;
   let baseKeys: string[] = [];
   const readPreserveKeys = () => {
@@ -230,13 +231,15 @@ export function prepareSessionEntryMaintenanceInDatabase(
       readCapCandidates: (remainingEntryCount) => {
         const overflow = Math.max(0, remainingEntryCount - maintenance.maxEntries);
         if (overflow > 0) {
-          const capStore = readSessionMaintenanceCapCandidates({
+          const candidates = readSessionMaintenanceCapCandidates({
             database: reader,
             overflow,
             preserveKeys: readPreserveKeys(),
             preserveRecentMs: maintenance.preserveRecentMs,
             excludedKeys: new Set([...removalReasons.keys(), ...archivedKeys]),
           });
+          durableNoCandidates = candidates.durableNoCandidates;
+          const capStore = candidates.store;
           return { store: capStore, maxEntries: Object.keys(capStore).length - overflow };
         }
         return undefined;
@@ -247,12 +250,16 @@ export function prepareSessionEntryMaintenanceInDatabase(
   const ageFact = recordSessionEntryMaintenanceAgeFact(reader, maintenance, plannedAt, entryCount);
   const selectedKeys = uniqueStrings([...archivedKeys, ...removalReasons.keys()]);
   if (selectedKeys.length === 0) {
+    const value = emptySessionEntryMaintenancePlan();
+    if (durableNoCandidates) {
+      value.durableNoCandidates = true;
+    }
     return {
       kind: "no-op",
-      value: emptySessionEntryMaintenancePlan(),
+      value,
       apply(database) {
         stageSessionEntryMaintenanceAgeFact(database.db, ageFact);
-        return emptySessionEntryMaintenancePlan();
+        return value;
       },
     };
   }

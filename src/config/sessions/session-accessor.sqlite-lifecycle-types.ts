@@ -355,6 +355,8 @@ type SessionEntryMaintenanceCounts = {
   capped: number;
 };
 export type SessionEntryMaintenancePlan = SessionEntryMaintenanceCounts & {
+  /** An exhaustive over-cap scan found only durable protection, without runtime/recent guards. */
+  durableNoCandidates?: true;
   /** Exact rows written by planning; parent publication must not rescan the store. */
   archivedEntries: Array<{ sessionKey: string; sessionId?: string }>;
   entryRemovals: SessionEntryRemovalPlan[];

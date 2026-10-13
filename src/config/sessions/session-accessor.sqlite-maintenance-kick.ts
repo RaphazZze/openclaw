@@ -571,9 +571,9 @@ async function runPendingMaintenance(
     };
     const noChanges = plan.archived === 0 && plan.entryRemovals.length === 0;
     const noFinalization = noChanges && plan.stateDeletePlans.length === 0;
-    // A protected over-cap store cannot improve on ordinary activity. Entry/protection
-    // changes invalidate its age fact; the existing periodic probe covers runtime providers.
-    owner.noCandidates = noFinalization && owner.generation === generation;
+    // Runtime protection can end without an entry change; only durable protection backs off.
+    owner.noCandidates =
+      noFinalization && plan.durableNoCandidates === true && owner.generation === generation;
     const verifiedNextAt = noChanges ? result.nextAt : undefined;
     if (!noFinalization) {
       await finalizeSessionEntryMaintenancePlansAfterWriterReleaseBestEffort(owner.scope, [plan], {

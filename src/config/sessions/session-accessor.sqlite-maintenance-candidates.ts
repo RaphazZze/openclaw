@@ -134,9 +134,9 @@ export function readSessionMaintenanceCapCandidates(params: {
   overflow: number;
   preserveKeys?: ReadonlySet<string>;
   preserveRecentMs?: number | null;
-}): Record<string, SessionEntry> {
+}): { store: Record<string, SessionEntry>; durableNoCandidates: boolean } {
   if (params.overflow <= 0) {
-    return {};
+    return { store: {}, durableNoCandidates: false };
   }
   const db = getSessionKysely(params.database.db);
   // Only push down keys unchanged by Node/SQLite text conversion; retain exact membership below.
@@ -149,6 +149,7 @@ export function readSessionMaintenanceCapCandidates(params: {
     entry: SessionEntry;
     activityAt: number;
   }> = [];
+  let durableNoCandidates = true;
   for (const row of iterateSqliteQuerySync(
     params.database.db,
     db
@@ -181,9 +182,20 @@ export function readSessionMaintenanceCapCandidates(params: {
       continue;
     }
     const entry = parseSessionEntryJson(row);
-    if (!entry || shouldPreserveMaintenanceEntry({ ...params, key: row.session_key, entry })) {
+    if (!entry) {
+      durableNoCandidates = false;
       continue;
     }
+    if (shouldPreserveMaintenanceEntry({ ...params, key: row.session_key, entry })) {
+      // Runtime ownership and recent activity can end without a durable entry change.
+      durableNoCandidates &&= shouldPreserveMaintenanceEntry({
+        key: row.session_key,
+        entry,
+        preserveRecentMs: null,
+      });
+      continue;
+    }
+    durableNoCandidates = false;
     const candidate = {
       key: row.session_key,
       keyBytes,
@@ -212,9 +224,12 @@ export function readSessionMaintenanceCapCandidates(params: {
     }
   }
   // The phase owner reverses this original SQLite key order to resolve activity ties.
-  return Object.fromEntries(
-    selected
-      .toSorted((left, right) => Buffer.compare(left.keyBytes, right.keyBytes))
-      .map(({ key, entry }) => [key, entry]),
-  );
+  return {
+    store: Object.fromEntries(
+      selected
+        .toSorted((left, right) => Buffer.compare(left.keyBytes, right.keyBytes))
+        .map(({ key, entry }) => [key, entry]),
+    ),
+    durableNoCandidates,
+  };
 }
