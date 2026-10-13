@@ -11,6 +11,7 @@ import { PROTOCOL_VERSION } from "../../packages/gateway-protocol/src/index.js";
 import { getRuntimeConfig } from "../config/io.js";
 import {
   captureSessionActorStorageOwner,
+  readCapturedSessionActorEntry,
   type CapturedSessionActorStorageOwner,
 } from "../config/sessions/session-actor-storage-binding.js";
 import type { PaginatedSessionHistory } from "../config/sessions/session-history-types.js";
@@ -49,7 +50,6 @@ import {
   SessionHistorySseState,
 } from "./session-history-state.js";
 import { resolveCursorSeq } from "./session-history-tail.js";
-import { captureIncognitoSessionMutationFacts } from "./session-sharing-incognito.js";
 import {
   prepareSessionMutationFacts,
   type PreparedSessionSourceFacts,
@@ -220,10 +220,6 @@ async function serveAuthorizedSessionHistory(
   assertSourceCurrent: () => void,
 ): Promise<boolean> {
   const { cfg, requestAuth, operatorScopes } = authResult;
-  const sourceFacts =
-    source && !("kind" in source)
-      ? captureIncognitoSessionMutationFacts(source, sessionKey, true)
-      : undefined;
   let sharing: SessionFactsRead<PreparedSessionSourceFacts> | undefined;
   using sharingLifetime = {
     transferred: false,
@@ -238,7 +234,7 @@ async function serveAuthorizedSessionHistory(
   try {
     if (source) {
       assertSourceCurrent();
-      entry = source.owner?.readSession(sessionKey, source.authority)?.entry;
+      entry = readCapturedSessionActorEntry(source, sessionKey);
       target = {
         agentId: source.agentId,
         canonicalKey: sessionKey,
@@ -368,9 +364,19 @@ async function serveAuthorizedSessionHistory(
     }
     let currentTarget;
     try {
-      currentTarget = sourceFacts
-        ? sourceFacts.readCurrent().target
-        : sharing!.readCurrent(currentConfig).target;
+      if (source) {
+        const currentEntry = readCapturedSessionActorEntry(source, sessionKey);
+        currentTarget = currentEntry
+          ? {
+              agentId: source.agentId,
+              canonicalKey: sessionKey,
+              storePath: source.path,
+              entry: currentEntry,
+            }
+          : null;
+      } else {
+        currentTarget = sharing!.readCurrent(currentConfig).target;
+      }
     } catch {
       return false;
     }

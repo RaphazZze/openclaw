@@ -39,7 +39,6 @@ import { resolveSessionStoreIdentity } from "./session-store-key.js";
 import type { GatewaySessionStoreDiscoveryCache } from "./session-utils-store-candidates.js";
 import {
   withGatewaySessionStoreTarget,
-  resolveNativeGatewaySessionStoreTargetWithStore,
   resolveGatewaySessionStoreTargetWithStoreAsync,
   type GatewaySessionStoreCache,
 } from "./session-utils-store-lookup.js";
@@ -126,26 +125,7 @@ export function resolveIncognitoSessionSharingTarget(params: {
   targetDiscoveryCache?: GatewaySessionStoreDiscoveryCache;
   onReadSource?: (source: CapturedSessionEntryReadSource) => void;
 }): SessionSharingTarget | null {
-  const captured = captureSessionSharingIncognitoTarget(params);
-  if (captured) {
-    return captured.target;
-  }
-  if (!isIncognitoSessionKey(params.sessionKey)) {
-    return null;
-  }
-  const target = resolveNativeGatewaySessionStoreTargetWithStore({
-    cfg: params.cfg,
-    key: params.sessionKey,
-    agentId: params.agentId,
-    clone: false,
-    projection: "list",
-    readConsistency: "latest",
-    exactRead: true,
-  });
-  if (target.capturedReadSource) {
-    params.onReadSource?.(target.capturedReadSource);
-  }
-  return toSessionSharingTarget(target);
+  return captureSessionSharingIncognitoTarget(params)?.target ?? null;
 }
 
 export async function resolveSessionSharingTargetAsync(params: {
@@ -159,20 +139,7 @@ export async function resolveSessionSharingTargetAsync(params: {
 }): Promise<SessionSharingTarget | null> {
   const captured = captureSessionSharingIncognitoTarget(params);
   if (captured) {
-    const facts =
-      captured.kind === "memory"
-        ? captureSessionActorMutationFacts(
-            captured.binding,
-            captured.canonicalKey,
-            true,
-            captured.storePath,
-          )
-        : captureIncognitoSessionMutationFacts(captured.binding, captured.canonicalKey, true);
-    const target = facts.readCurrent().target;
-    if (captured.kind === "memory" && target?.readSource) {
-      params.onReadSource?.(target.readSource);
-    }
-    return target;
+    return captured.target;
   }
   const target = await resolveGatewaySessionStoreTargetWithStoreAsync({
     cfg: params.cfg,
