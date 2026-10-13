@@ -5,7 +5,6 @@ import {
   withArtifactPreservingStateReads,
 } from "./openclaw-state-db-readonly.js";
 import { captureOpenClawStateWorkerContext } from "./openclaw-state-worker-context.js";
-import { runOpenClawStateWorkerOperation } from "./openclaw-state-worker-store.js";
 import { createAuthProfileCredentialWriteAdmission } from "./user-model-account-authority.js";
 
 export async function readConfigMachineStateAsync<T>(
@@ -43,6 +42,7 @@ export async function writeConfigMachineStateAsync(
   value: unknown,
   options: OpenClawStateDatabaseOptions = {},
 ): Promise<number> {
+  const { runOpenClawStateWorkerOperation } = await import("./openclaw-state-worker-store.js");
   const stateKey = normalizeConfigMachineStateKey(key);
   const context = captureOpenClawStateWorkerContext(options);
   return runOpenClawStateWorkerOperation(

@@ -1722,7 +1722,6 @@ src/state/config-machine-state-async.ts
 src/state/config-machine-state-row.ts
 src/state/config-machine-state-write.ts
 src/state/config-machine-state.ts
-src/state/state-domain-publication.ts
 src/state/creator-namespace-migration.ts
 src/state/json-predicate-fields.ts
 src/state/openclaw-agent-board-schema.ts
