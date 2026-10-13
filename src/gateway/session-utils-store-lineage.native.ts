@@ -56,7 +56,7 @@ export function createGatewaySessionLineageReader(cfg: OpenClawConfig) {
     }
   }
   function readAlias(key: string, agentId: string) {
-    const metadata = captureSessionEntryMetadataRead({ sessionKey: key, agentId });
+    const metadata = captureSessionEntryMetadataRead({ sessionKey: key, agentId }, () => {});
     if (metadata) {
       return metadata.readCurrent();
     }
