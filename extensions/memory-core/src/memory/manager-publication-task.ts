@@ -12,6 +12,9 @@ import type {
   refreshMemorySessionSourceState,
 } from "./manager-source-state.js";
 
+export const MEMORY_INDEX_WRITE_SCOPE = "memory-index";
+export const MEMORY_EMBEDDING_CACHE_WRITE_SCOPE = "memory-embedding-cache";
+
 export type MemoryPublicationConnection = MemoryShadowConnection | { kind: "agent" };
 export type MemoryPublicationState = {
   vector: { enabled: boolean; available: boolean | null };
@@ -115,6 +118,13 @@ export type MemoryPublicationOperations = {
   "source.replace": {
     input: { state: MemoryPublicationState };
     output: MemoryPublicationResult<boolean>;
+  };
+  "source.replace.group": {
+    input: {
+      sources: Array<{ header: MemorySourceIndexHeader; fragments: MemoryPublicationFragment[] }>;
+      state: MemoryPublicationState;
+    };
+    output: MemoryPublicationOperations["source.replace"]["output"];
   };
   "source.replace.inline": {
     input: {

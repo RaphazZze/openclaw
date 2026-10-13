@@ -127,6 +127,7 @@ function readPlacement(gateway: WireGateway, key: string) {
 it.skipIf(process.platform === "win32")(
   "settles native A, deletes it, then runs B on the same one-slot node",
   async (context) => {
+    process.stderr.write("[native-slot] starting one-slot proof\n");
     const gatewayOwner = createQaGatewayChild();
     const settlement = createWireWorkspaceSettlementWaiter();
     let providerResource: Awaited<ReturnType<typeof providerFixture>> | undefined;

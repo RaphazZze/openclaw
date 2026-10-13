@@ -215,6 +215,7 @@ describe("paired node worker Gateway upgrade wire", () => {
           { runId, timeoutMs: PROOF_TIMEOUT_MS },
           { timeoutMs: PROOF_TIMEOUT_MS + 5_000 },
         );
+        expect(firstTurn).toMatchObject({ status: "ok" });
         const activeGateway = gateway;
         await vi.waitFor(
           () => {
@@ -225,7 +226,7 @@ describe("paired node worker Gateway upgrade wire", () => {
           },
           { timeout: PROOF_TIMEOUT_MS, interval: 100 },
         );
-        expect(blockedUploads, JSON.stringify(firstTurn)).toBeGreaterThan(0);
+        expect(blockedUploads).toBeGreaterThan(0);
         const localDir = created.execCwd ?? created.spawnedCwd;
         if (!localDir) {
           throw new Error("session omitted its canonical workspace");

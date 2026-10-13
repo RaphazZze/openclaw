@@ -17,6 +17,7 @@ import {
 import { TranscriptEndAnchor } from "./chat-transcript-end-anchor.ts";
 import {
   initialTranscriptRect,
+  isTranscriptRangeCommitted,
   measureTranscriptRow,
   PositionRailGutterController,
 } from "./chat-transcript-geometry.ts";
@@ -355,6 +356,10 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     }
     if (!this.initialPositionPending || (this.contentReady && this.rowKeys.length === 0)) {
       applyPendingScrollOffset(this.scrollRestoreHost);
+      if (this.initialPositionPending) {
+        this.initialPositionPending = false;
+        this.renderer.syncInitialPosition();
+      }
     }
     this.queueLayout();
     // Disclosure measurement owns this commit; its sizer lands on the next update.
@@ -506,7 +511,7 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
           layout: this.layout,
           headerHeight: this.headerHeight,
           presented: snapshot.presented,
-          initialPositionPending: this.initialPositionPending,
+          initialPositionPending: () => this.initialPositionPending,
           onCommit: () => this.connected && this.didCommit(),
           rows,
           getContent: (index) => (rows[index] ? renderRow(rows[index]) : nothing),
@@ -556,6 +561,11 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
 
   get isProgrammaticScroll(): boolean {
     return isTranscriptProgrammaticScroll(this.offsetState, this.scrollElement);
+  }
+
+  get isPositionSettled(): boolean {
+    const { pendingScrollOffset } = this.offsetState;
+    return this.contentReady && !this.initialPositionPending && !pendingScrollOffset;
   }
 
   private canAutoFollow(): boolean {
@@ -655,25 +665,6 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     return true;
   }
 
-  private completeMessageReveal(): void {
-    const command = this.offsetState.scrollCommand;
-    if (command?.target !== "message") {
-      return;
-    }
-    const virtualizer = this.virtualizer;
-    if (this.messageReveal.reveal(this.threadInnerElement, command, virtualizer)) {
-      this.offsetState.scrollCommand = { behavior: command.behavior, target: "index" };
-      return;
-    }
-    // Expanding folded work can move the target beyond the initially mounted rows.
-    const rowKey = this.messageRowKeysById.get(command.messageId);
-    const rowIndex = rowKey ? this.rowIndexesByKey.get(rowKey) : undefined;
-    if (rowIndex !== undefined) {
-      virtualizer.scrollToIndex(rowIndex, { align: "center" });
-      this.host.requestUpdate();
-    }
-  }
-
   setContentReady(ready: boolean): void {
     this.contentReady = ready;
   }
@@ -739,7 +730,7 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
       (this.initialPositionPending && this.rowKeys.length) ||
       this.offsetState.scrollCommand?.target === "message"
     ) {
-      this.renderer.queueAfterLayout(this.completeLayout);
+      this.renderer.queueAfterCommit(this.completeLayout);
     }
   }
 
@@ -747,7 +738,13 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     if (!this.connected) {
       return;
     }
-    this.completeMessageReveal();
+    this.messageReveal.complete(
+      this.threadInnerElement,
+      this.offsetState,
+      this.virtualizer,
+      this.messageRowKeysById,
+      this.rowIndexesByKey,
+    );
     if (!this.initialPositionPending || !this.rowKeys.length || !this.scrollElement?.clientHeight) {
       return;
     }
@@ -761,7 +758,6 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
       applyPendingScrollOffset(this.scrollRestoreHost);
       return;
     }
-    this.initialPositionPending = false;
     if (
       this.canAutoFollow() &&
       !this.offsetState.pendingInteractionAnchor &&
@@ -769,6 +765,10 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     ) {
       this.scrollToEnd({ source: "auto", behavior: "instant" });
       this.offsetState.syncNativeOffset?.();
+    }
+    if (isTranscriptRangeCommitted(this.threadInnerElement, this.virtualizer)) {
+      this.initialPositionPending = false;
+      this.renderer.syncInitialPosition();
     }
     this.host.requestUpdate();
   };

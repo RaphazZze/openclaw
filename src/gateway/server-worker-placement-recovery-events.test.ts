@@ -189,7 +189,6 @@ async function withRecoveryRuntime(
         getAsync: async (sessionId: string) => placements.get(sessionId),
         listAsync: async () => [...placements.values()],
         readChangeSnapshot,
-        registerTurnClaimClosedHandler: vi.fn(() => vi.fn()),
         readProjection: async (sessionIds: readonly string[]) => ({
           placements: new Map(
             sessionIds.flatMap((id) => {

@@ -129,7 +129,6 @@ function createMaintenanceRuntime(params: {
     cancelSessionWork: vi.fn(async () => {}),
     placements: {
       workspaceResultInstanceId: () => "gateway-test",
-      registerTurnClaimClosedHandler: vi.fn(() => vi.fn()),
       get: (sessionId: string) =>
         params.placements.find((placement) => placement.sessionId === sessionId),
       listAsync: async () => params.placements,

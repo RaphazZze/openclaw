@@ -18,7 +18,7 @@ import {
   type SqliteWorkerStore,
   runQueuedStoreWrite,
   readOpenClawAgentDatabaseIdentity,
-  readSqliteDatabaseWriteTokenForPath,
+  readSqliteDatabaseScopedWriteTokenForPath,
   supportsOpenClawAgentDatabaseExecution,
   type StoreWriterQueue,
 } from "openclaw/plugin-sdk/sqlite-runtime";
@@ -34,6 +34,7 @@ import type {
   MemoryPublicationResult,
   MemoryPublicationState,
 } from "./manager-publication-task.js";
+import { MEMORY_INDEX_WRITE_SCOPE } from "./manager-publication-task.js";
 import { memoryEmbeddingCacheFitsInline } from "./manager-publication-transfer.js";
 import {
   initializePublishedMemory,
@@ -114,7 +115,7 @@ export class MemoryIndexDatabase {
     try {
       database.fts.enabled = params.schema.ftsEnabled;
       if (params.maintenanceSource) {
-        database.installFacts(params.maintenanceSource.facts);
+        database.installFacts(params.maintenanceSource.facts, params.maintenanceSource.factsToken);
       }
       if (
         params.maintenanceSource &&
@@ -231,7 +232,9 @@ export class MemoryIndexDatabase {
 
   private writeToken(): string | undefined {
     const filename = this.shadow?.path ?? this.writeOptions?.path;
-    return filename ? readSqliteDatabaseWriteTokenForPath(filename) : undefined;
+    return filename
+      ? readSqliteDatabaseScopedWriteTokenForPath(filename, MEMORY_INDEX_WRITE_SCOPE)
+      : undefined;
   }
 
   private installFacts(facts: MemoryDatabaseFacts, token?: string): void {
@@ -510,24 +513,21 @@ export class MemoryIndexDatabase {
       throw new Error("Memory index reads require their captured database target");
     }
     assertCurrent();
-    this.assertPublishedFileCurrent();
     const result = await runMemoryIndexRead(
       { agentId: target.agentId, databasePath: target.path },
       command,
     );
     assertCurrent();
-    this.assertPublishedFileCurrent();
     return result;
   }
 
   admitSchema(input: MemoryPublicationOperations["schema.admit"]["input"]): Promise<void> {
-    this.schemaAdmission ??= this.runPublication(
-      (scope) => this.retryPublication(() => scope.execute({ type: "schema.admit", input })),
-      () => {
+    this.schemaAdmission ??= this.retryPublication(() =>
+      this.executePublication({ type: "schema.admit", input }, () => {
         if (this.closed || !this.db.isOpen) {
           throw new Error("Memory database owner closed before schema admission");
         }
-      },
+      }),
     ).then((result) => {
       if (!result) {
         throw new Error("Memory schema admission did not complete");
@@ -585,7 +585,7 @@ export class MemoryIndexDatabase {
   }
 
   async replaceSource(
-    replacement: MemorySourceIndexReplacement,
+    replacement: MemorySourceIndexReplacement | MemorySourceIndexReplacement[],
     assertCurrent: () => void,
     prepare: () => Promise<boolean>,
   ) {
@@ -606,18 +606,14 @@ export class MemoryIndexDatabase {
     input: Omit<MemoryPublicationOperations["source.delete"]["input"], "state">,
     assertCurrent: () => void,
   ) {
-    const run = () =>
-      this.runPublication(
-        (scope) =>
-          this.retryPublication(() =>
-            scope.execute({
-              type: "source.delete",
-              input: { ...input, state: this.publicationState() },
-            }),
-          ),
-        assertCurrent,
-      );
-    return this.withSourceMutation(run);
+    return this.withSourceMutation(() =>
+      this.retryPublication(() =>
+        this.executePublication(
+          { type: "source.delete", input: { ...input, state: this.publicationState() } },
+          assertCurrent,
+        ),
+      ),
+    );
   }
 
   refreshSourceState(
@@ -625,9 +621,8 @@ export class MemoryIndexDatabase {
     assertCurrent: () => void,
   ) {
     return this.withSourceMutation(() =>
-      this.runPublication(
-        (scope) => this.retryPublication(() => scope.execute({ type: "source.refresh", input })),
-        assertCurrent,
+      this.retryPublication(() =>
+        this.executePublication({ type: "source.refresh", input }, assertCurrent),
       ),
     );
   }
@@ -667,21 +662,20 @@ export class MemoryIndexDatabase {
     },
     assertCurrent: () => void,
   ) {
-    await this.runPublication(
-      (scope) =>
-        this.retryPublication(() =>
-          scope.execute({
-            type: "database.publish",
-            input: {
-              ...input,
-              state: {
-                ...this.publicationState(),
-                extensionPath: input.sourceHasVectors ? input.extensionPath : undefined,
-              },
+    await this.retryPublication(() =>
+      this.executePublication(
+        {
+          type: "database.publish",
+          input: {
+            ...input,
+            state: {
+              ...this.publicationState(),
+              extensionPath: input.sourceHasVectors ? input.extensionPath : undefined,
             },
-          }),
-        ),
-      assertCurrent,
+          },
+        },
+        assertCurrent,
+      ),
     );
   }
 

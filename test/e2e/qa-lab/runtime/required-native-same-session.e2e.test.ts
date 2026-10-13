@@ -128,10 +128,7 @@ it.skipIf(process.platform === "win32")(
     const startedAt = Date.now();
     const record = (boundary: string, detail: unknown) => {
       const entry = { ms: Date.now() - startedAt, boundary, detail };
-      console.info("required-native-boundary", JSON.stringify(entry));
-      process.stdout.write(
-        `required-native-boundary ${JSON.stringify({ ms: entry.ms, boundary })}\n`,
-      );
+      process.stderr.write(`required-native-boundary ${JSON.stringify(entry)}\n`);
     };
     let onNativeRequest: ((marker: string) => void) | undefined;
     let nativeServer: ReturnType<typeof createServer> | undefined;
@@ -566,6 +563,8 @@ it.skipIf(process.platform === "win32")(
               atQuiesce.promise,
               "A never reached physical terminal receipt / quiescence",
             );
+            expect(await aWait).toMatchObject({ status: "ok" });
+            record("A-agent.wait-before-workspace-settlement", { creation, timing });
             const current = await describe(key);
             record("A-sessions.describe-pending", {
               creation,
@@ -634,8 +633,6 @@ it.skipIf(process.platform === "win32")(
             await checkpoint(atResume.promise, "A never accepted its unchanged workspace result");
             finishReleased = true;
             continueResume.resolve();
-            expect(await aWait).toMatchObject({ status: "ok" });
-            record("A-agent.wait", { creation, timing });
             await checkpoint(changedClear.promise, "settled placement never published clear");
             if (timing === "after-agent-wait") {
               const settled = readSettlement(gateway, key);

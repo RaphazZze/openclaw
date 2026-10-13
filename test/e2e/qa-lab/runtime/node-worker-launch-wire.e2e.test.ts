@@ -674,6 +674,13 @@ describe("node worker launch wire", () => {
           expect(Math.max(...freshConnectionSamples)).toBeLessThan(CONTROL_PROBE_MAX_MS);
           expect(freshConnectionSamples).toHaveLength(FINALIZATION_LOAD_WAVES);
 
+          phase = "workspace settlement before node shutdown";
+          const settlementOperator = operator;
+          await Promise.all(
+            [SESSION_KEY, legacySessionKey, ...loadSessions].map((key) =>
+              settlement.wait(settlementOperator, key, signal),
+            ),
+          );
           phase = "node shutdown";
           await workerNode.stop();
           workerNode = undefined;
