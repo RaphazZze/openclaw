@@ -12,6 +12,7 @@ import { clearPluginMetadataLifecycleCaches } from "../../plugins/plugin-metadat
 import { writeRegistryPackagePlugin } from "../../plugins/test-helpers/plugin-registry-snapshot.js";
 import { closeOpenClawStateDatabaseAsync } from "../../state/openclaw-state-db.js";
 import { pinConfigDir } from "../../utils.js";
+import { mergeSkillRecords } from "../loading/skill-precedence.js";
 import { resolveSkillDiscoveryLimits } from "../loading/skill-root-discovery.js";
 import { writeSkill } from "../test-support/e2e-test-helpers.js";
 import {
@@ -113,12 +114,16 @@ it("shares one installed-index read across workspaces and observes writes on the
         throw new Error("Expected scan results");
       }
       expect(
-        result.results.map(({ sources }) =>
-          sources.entries.map(({ skill }) => skill.name).toSorted(),
+        result.results.map(({ key, sources }) =>
+          mergeSkillRecords(sources.entries, key)
+            .map(({ skill }) => skill.name)
+            .toSorted(),
         ),
       ).toEqual(workspaces.map((_, index) => [`local-${index}`, pluginName].toSorted()));
       expect(
-        observed.queries.filter((sql) => /from "config_machine_state"/i.test(sql)),
+        observed.queries.filter((sql) =>
+          /^select "state_key", "value_json" from "config_machine_state"/i.test(sql),
+        ),
       ).toHaveLength(1);
     } finally {
       observed.restore();
