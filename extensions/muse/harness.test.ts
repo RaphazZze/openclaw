@@ -7,6 +7,8 @@ import type {
   AgentHarnessAttemptResult,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { AuthStorage, ModelRegistry } from "openclaw/plugin-sdk/agent-sessions";
+import type * as ProviderAuthRuntime from "openclaw/plugin-sdk/provider-auth-runtime";
+import type * as TranscriptRuntime from "openclaw/plugin-sdk/session-transcript-runtime";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createMuseAgentHarness, type MuseSessionBinding } from "./harness.js";
 import { selectApprovalChoice, type MuseApprovalRequest } from "./src/approvals.js";
@@ -16,12 +18,14 @@ const writes = vi.hoisted(() => ({
   append: vi.fn(async (params: { messages: unknown[] }) => params.messages),
   publish: vi.fn(async () => undefined),
 }));
-vi.mock("openclaw/plugin-sdk/session-transcript-runtime", () => ({
+vi.mock("openclaw/plugin-sdk/session-transcript-runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof TranscriptRuntime>()),
   appendSessionTranscriptMessagesByIdentity: writes.append,
   publishSessionTranscriptUpdateByIdentity: writes.publish,
 }));
 const auth = vi.hoisted(() => ({ resolve: vi.fn(async () => ({ apiKey: "profile-key" })) }));
-vi.mock("openclaw/plugin-sdk/provider-auth-runtime", () => ({
+vi.mock("openclaw/plugin-sdk/provider-auth-runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof ProviderAuthRuntime>()),
   resolveApiKeyForProvider: auth.resolve,
 }));
 
