@@ -228,7 +228,7 @@ suite.define(() => {
           if (
             withholdCompletionNotifications &&
             capturedSessionId &&
-            payload.sessionId === capturedSessionId &&
+            (payload.sessionId === undefined || payload.sessionId === capturedSessionId) &&
             (frame.event === "sessions.changed" || frame.event === "session.message")
           ) {
             // Cleanup can trigger history before its terminal snapshot is published.
