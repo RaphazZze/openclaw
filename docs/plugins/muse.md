@@ -134,8 +134,11 @@ including their media type and base64 payload.
 
 The harness resolves `tools.exec.mode`, legacy `security`/`ask` settings,
 agent-specific settings, and per-session exec overrides in that order.
-Explicit modes replace legacy fields in the same layer. The effective policy
-maps to Muse's approval mode and sandbox posture:
+Explicit modes replace legacy fields in the same layer. Host-local exec approval
+defaults and agent-specific approval settings then apply as stricter security
+and ask floors; `tools.exec.mode: "full"` does not bypass them. Only an explicit
+full-session elevation can bypass those floors while its effective security
+remains full. The effective policy maps to Muse's approval mode and sandbox posture:
 
 | OpenClaw exec policy                 | Muse behavior                                                                                 |
 | ------------------------------------ | --------------------------------------------------------------------------------------------- |
@@ -177,6 +180,19 @@ created with a permission profile that needs the subscription's automated
 reviewer after `muse logout`). Transport failures, and sessions Muse reports as
 in use or overloaded, fail the turn instead, so a turn that may still be
 running is never repeated.
+
+Every fresh Muse session receives the retained OpenClaw conversation branch
+before the current prompt, including after a model change, a refused resume, or
+a committed history reset. This transfer is bounded by OpenClaw's model-context
+reader. If the retained context cannot be read safely within that bound, the
+turn fails instead of silently starting without its history; compact the
+session or switch to the `openclaw` runtime.
+
+Fresh sessions also receive OpenClaw workspace bootstrap context, such as
+`SOUL.md`, `USER.md`, and `MEMORY.md`, with the normal session, channel, and
+bootstrap-mode filters. MSP has no system-message or history-import field, so
+the harness prefixes this context to the first native user input. Resumed
+sessions do not repeat that prefix.
 
 `/new` and `/reset` stop an active Muse turn and delete the binding.
 Rewinding or switching branches within the same OpenClaw session also

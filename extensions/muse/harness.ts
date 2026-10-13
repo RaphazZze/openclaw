@@ -17,6 +17,10 @@ import {
   resolveSessionAgentIdsStrict,
 } from "openclaw/plugin-sdk/agent-scope-runtime";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import {
+  loadExecApprovalsReadOnlyAsync,
+  resolveExecApprovalsFromFile,
+} from "openclaw/plugin-sdk/exec-approvals-runtime";
 import { KeyedAsyncQueue } from "openclaw/plugin-sdk/keyed-async-queue";
 import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
 import type { PluginLogger } from "openclaw/plugin-sdk/plugin-entry";
@@ -27,6 +31,7 @@ import {
   publishSessionTranscriptUpdateByIdentity,
 } from "openclaw/plugin-sdk/session-transcript-runtime";
 import { createApprovalHandler } from "./src/approvals.js";
+import { prepareMuseSessionContext } from "./src/context.js";
 import { consumeTurn } from "./src/events.js";
 import { credentialFingerprint, MusePool, openMuseSession } from "./src/runtime.js";
 
@@ -112,12 +117,33 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         params.config ?? {},
         params.sandboxAgentId ?? sessionAgentId,
       )?.tools?.exec;
-      let policy = execPolicy.resolveExecModePolicy({ security: "full", ask: "on-miss" });
-      for (const layer of [params.config?.tools?.exec, agentExec, params.execOverrides]) {
+      const fullSession = params.permissionMode === "full";
+      let policy = execPolicy.resolveExecModePolicy({
+        security: "full",
+        ask: fullSession ? "off" : "on-miss",
+      });
+      const policyLayers = fullSession
+        ? [params.execOverrides]
+        : [params.config?.tools?.exec, agentExec, params.execOverrides];
+      for (const layer of policyLayers) {
         policy = execPolicy.resolveExecModePolicy({
           mode: layer?.mode,
           security: layer?.security ?? policy.security,
           ask: layer?.ask ?? policy.ask,
+        });
+      }
+      // Only explicit full-session elevation bypasses the host approval floors.
+      if (!fullSession || policy.security !== "full") {
+        const approvals = await loadExecApprovalsReadOnlyAsync();
+        params.hostCapabilities.assertActive();
+        const floors = resolveExecApprovalsFromFile({
+          file: approvals,
+          agentId: params.sandboxAgentId ?? sessionAgentId,
+          overrides: { security: policy.security, ask: policy.ask },
+        }).agent;
+        policy = execPolicy.resolveExecModePolicy({
+          security: execPolicy.minSecurity(policy.security, floors.security),
+          ask: execPolicy.maxAsk(policy.ask, floors.ask),
         });
       }
       const { security, ask } = policy;
@@ -241,16 +267,33 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
           stored &&
           stored.compatibility === compatibility &&
           !params.initialReplayState?.replayInvalid;
+        let freshSession = !resumable;
         session = await openMuseSession(runtime, {
           ...(resumable ? { sessionId: stored.sessionId } : {}),
           workspace,
           modelId: params.modelId,
           approvalMode,
           onResumeRefused: (message) => {
+            freshSession = true;
             options.logger?.warn(`${message}; started a new Muse session.`);
           },
         });
         assertDispatchActive();
+        let sessionContext = "";
+        if (freshSession) {
+          try {
+            sessionContext = await prepareMuseSessionContext(
+              params,
+              { ...transcriptTarget, agentId: target.agentId ?? sessionAgentId },
+              options.logger?.warn,
+            );
+          } catch (error) {
+            throw museRefusal(
+              `Muse could not restore OpenClaw session context. Use the openclaw runtime or compact the session before retrying. ${formatErrorMessage(error)}`,
+            );
+          }
+          assertDispatchActive();
+        }
         await options.sessionStore.register(params.sessionId, {
           sessionId: session.sessionId,
           compatibility,
@@ -273,9 +316,9 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         const input: MuseInputPart[] = [
           {
             type: "text",
-            text: params.extraSystemPrompt
-              ? `${params.extraSystemPrompt}\n\n${params.prompt}`
-              : params.prompt,
+            text: [sessionContext, params.extraSystemPrompt, params.prompt]
+              .filter(Boolean)
+              .join("\n\n"),
           },
           ...(params.images ?? []).map((image): MuseInputPart => ({
             type: "image",

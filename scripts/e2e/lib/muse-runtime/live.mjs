@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { createHarness } from "./gateway.mjs";
 
 // Models refuse to "remember a token"; a neutral per-run fact proves recall without that refusal.
@@ -59,6 +60,22 @@ try {
   );
   console.log("Muse conversation recall survived a Gateway restart.");
 
+  stage = "recall after native session replacement";
+  // A model change starts a new Muse session; OpenClaw must seed it with the retained conversation.
+  await harness.stop();
+  harness.config.agents.defaults.model = "meta/muse-spark-1.2";
+  harness.config.agents.defaults.models = {
+    "meta/muse-spark-1.2": { agentRuntime: { id: "muse" } },
+  };
+  harness.saveConfig();
+  await harness.start();
+  const replaced = await harness.turn(recallPrompt);
+  assert.ok(
+    replaced.text.includes(token),
+    "A replacement Muse session must receive the retained OpenClaw conversation",
+  );
+  console.log("Muse recalled the conversation in a replacement native session.");
+
   stage = "native shell approval";
   const fixture = path.join(harness.workspace, `shell-approval-${randomUUID()}`);
   const removalTarget = path.join(fixture, "remove-me");
@@ -95,6 +112,45 @@ try {
     "Approved native shell must remove the disposable fixture",
   );
   console.log(`Muse native shell completed with ${shell.approvals.length} allow-once approval(s).`);
+
+  stage = "denied native shell";
+  const deniedFile = path.join(fixture, "denied.txt");
+  const denied = await harness.turn(
+    `Use your native shell tool to execute exactly this command once: printf denied > ${quote(deniedFile)}\nRequest approval when required and wait for it. Do not use file-editing tools or any other command. Then reply briefly.`,
+    { decision: "deny", expectError: true },
+  );
+  assert.ok(denied.approvals.length > 0, "The denied command must request an OpenClaw approval");
+  await assert.rejects(
+    access(deniedFile),
+    { code: "ENOENT" },
+    "A denied native shell command must not run",
+  );
+  console.log("Muse respected an OpenClaw deny: the command did not run.");
+
+  stage = "cancellation after approval";
+  const lateFile = path.join(fixture, "late.txt");
+  const cancelled = await harness.turn(
+    `Use your native shell tool to execute exactly this command once: sleep 20 && printf late > ${quote(lateFile)}\nRequest approval when required and wait for it. Do not use any other command.`,
+    {
+      decision: "allow-once",
+      expectError: true,
+      // Abort shortly after approval, while the approved command is sleeping.
+      afterApproval: (runId) =>
+        setTimeout(() => {
+          void harness.client.request("chat.abort", { sessionKey: harness.sessionKey, runId });
+        }, 3000),
+    },
+  );
+  assert.ok(cancelled.approvals.length > 0, "The long command must request an OpenClaw approval");
+  assert.notEqual(cancelled.wait.status, "ok", "The aborted run must not report success");
+  // Wait past the command's sleep: an interrupted native command must leave no late effect.
+  await delay(25_000);
+  await assert.rejects(
+    access(lateFile),
+    { code: "ENOENT" },
+    "An aborted native command must not complete after the attempt ends",
+  );
+  console.log("Muse cancellation stopped the approved command before its late effect.");
 
   stage = "credential logout";
   // Drop the environment key before stopping: start() builds a fresh child environment.

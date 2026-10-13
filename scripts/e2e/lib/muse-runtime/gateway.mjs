@@ -48,6 +48,8 @@ export async function createHarness() {
   let activeApprovals;
   let activeDecision;
   let approvalFailure;
+  let activeAfterApproval;
+  let activeRunId;
   async function stop() {
     client?.stop();
     client = undefined;
@@ -113,6 +115,7 @@ export async function createHarness() {
               kind: "plugin",
               decision: activeDecision ?? "deny",
             })
+            .then(() => activeAfterApproval?.(activeRunId))
             .catch((error) => {
               approvalFailure = error;
             });
@@ -121,9 +124,10 @@ export async function createHarness() {
       connection.start();
     });
   }
-  async function turn(message, { decision, expectError = false } = {}) {
+  async function turn(message, { decision, expectError = false, afterApproval } = {}) {
     activeApprovals = [];
     activeDecision = decision;
+    activeAfterApproval = afterApproval;
     approvalFailure = undefined;
     const started = await client.request("chat.send", {
       sessionKey,
@@ -132,6 +136,7 @@ export async function createHarness() {
     });
     assert.equal(started.status, "started");
     assert.equal(typeof started.runId, "string");
+    activeRunId = started.runId;
     const wait = await client.request(
       "agent.wait",
       { runId: started.runId, timeoutMs: 300000 },

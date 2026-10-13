@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,10 +6,11 @@ import type {
   AgentHarnessAttemptParamsV2,
   AgentHarnessAttemptResult,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
-import { AuthStorage, ModelRegistry } from "openclaw/plugin-sdk/agent-sessions";
+import { AuthStorage, ModelRegistry, SessionManager } from "openclaw/plugin-sdk/agent-sessions";
+import type * as ExecApprovalsRuntime from "openclaw/plugin-sdk/exec-approvals-runtime";
 import type * as ProviderAuthRuntime from "openclaw/plugin-sdk/provider-auth-runtime";
 import type * as TranscriptRuntime from "openclaw/plugin-sdk/session-transcript-runtime";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMuseAgentHarness, type MuseSessionBinding } from "./harness.js";
 import { selectApprovalChoice, type MuseApprovalRequest } from "./src/approvals.js";
 import { MusePool, museEnvironment } from "./src/runtime.js";
@@ -28,6 +29,18 @@ vi.mock("openclaw/plugin-sdk/provider-auth-runtime", async (importOriginal) => (
   ...(await importOriginal<typeof ProviderAuthRuntime>()),
   resolveApiKeyForProvider: auth.resolve,
 }));
+const approvals = vi.hoisted(() => ({
+  load: vi.fn<typeof ExecApprovalsRuntime.loadExecApprovalsReadOnlyAsync>(),
+}));
+vi.mock("openclaw/plugin-sdk/exec-approvals-runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof ExecApprovalsRuntime>()),
+  loadExecApprovalsReadOnlyAsync: approvals.load,
+}));
+const readHistory = vi.spyOn(SessionManager, "openModelContextAsync");
+beforeEach(() => {
+  approvals.load.mockResolvedValue({ version: 1, agents: {} });
+  readHistory.mockResolvedValue(SessionManager.inMemory());
+});
 
 let workspace: string;
 const fixture = fileURLToPath(new URL("./src/test-support/fake-muse.mjs", import.meta.url));
@@ -221,6 +234,154 @@ describe("Muse native MSP harness", () => {
       }
     },
   );
+
+  it.each(["defaults", "agent"] as const)(
+    "applies host approval %s security floors before launching Muse",
+    async (scope) => {
+      const { harness, params } = setup();
+      const log = join(workspace, `${params.runId}.jsonl`);
+      approvals.load.mockResolvedValue(
+        scope === "defaults"
+          ? { version: 1, defaults: { security: "deny" } }
+          : { version: 1, agents: { main: { security: "deny" } } },
+      );
+      vi.stubEnv("MUSE_REQUEST_LOG", log);
+      try {
+        await harness.runAttempt({
+          ...params,
+          config: { tools: { exec: { mode: "full" } } },
+        });
+        expect(await readFile(log, "utf8")).toContain(
+          '"args":["serve","--disable-shell","--disable-write"]',
+        );
+      } finally {
+        await harness.dispose?.();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it("refuses host ask-always floors even when config grants full exec", async () => {
+    const { harness, params } = setup();
+    approvals.load.mockResolvedValue({ version: 1, defaults: { ask: "always" } });
+    try {
+      await expect(
+        harness.runAttempt({ ...params, config: { tools: { exec: { mode: "full" } } } }),
+      ).rejects.toThrow("ask: always");
+    } finally {
+      await harness.dispose?.();
+    }
+  });
+
+  it("allows explicit full-session elevation to bypass host floors", async () => {
+    const { harness, params } = setup();
+    const log = join(workspace, `${params.runId}.jsonl`);
+    approvals.load.mockResolvedValue({ version: 1, defaults: { security: "deny" } });
+    vi.stubEnv("MUSE_REQUEST_LOG", log);
+    try {
+      await harness.runAttempt({ ...params, permissionMode: "full" });
+      expect(await readFile(log, "utf8")).toContain('"approvalMode":"allowAll"');
+    } finally {
+      await harness.dispose?.();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each(["model change", "missing binding", "refused resume"] as const)(
+    "restores retained history when a %s starts a fresh session",
+    async (replacement) => {
+      const { harness, params, bindings } = setup();
+      const log = join(workspace, `${params.runId}.jsonl`);
+      const retained = SessionManager.inMemory();
+      readHistory.mockResolvedValue(retained);
+      vi.stubEnv("MUSE_REQUEST_LOG", log);
+      try {
+        await harness.runAttempt({ ...params, prompt: "My project codename is Cedar." });
+        await retained.appendMessageAsync({
+          role: "user",
+          content: "My project codename is Cedar.",
+          timestamp: 1,
+        });
+        await harness.runAttempt({ ...params, prompt: "Remember that for later." });
+        await retained.appendMessageAsync({
+          role: "user",
+          content: "Remember that for later.",
+          timestamp: 2,
+        });
+        if (replacement === "missing binding") {
+          bindings.delete(params.sessionId);
+        } else if (replacement === "refused resume") {
+          const binding = bindings.get(params.sessionId);
+          if (!binding) {
+            throw new Error("Missing first-turn binding");
+          }
+          bindings.set(params.sessionId, { ...binding, sessionId: "missing-session" });
+        }
+        await harness.runAttempt({
+          ...params,
+          modelId: replacement === "model change" ? "muse-other" : params.modelId,
+          prompt: "What is its codename?",
+        });
+        const turns = (await readFile(log, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line))
+          .filter((request) => request.method === "turn/start");
+        expect(turns).toHaveLength(3);
+        expect(turns[1].params.input[0].text).not.toContain("Cedar");
+        expect(turns[2].params.input[0].text).toContain("My project codename is Cedar.");
+        expect(turns[2].params.input[0].text).toContain("Remember that for later.");
+        expect(turns[2].params.input[0].text).toContain("What is its codename?");
+      } finally {
+        await harness.dispose?.();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it("includes workspace bootstrap files only on the first turn of a native session", async () => {
+    const { harness, params } = setup();
+    const bootstrapWorkspace = await mkdtemp(join(workspace, "bootstrap-"));
+    await writeFile(join(bootstrapWorkspace, "SOUL.md"), "Speak like a patient astronomer.");
+    const log = join(workspace, `${params.runId}.jsonl`);
+    vi.stubEnv("MUSE_REQUEST_LOG", log);
+    try {
+      await harness.runAttempt({ ...params, workspaceDir: bootstrapWorkspace });
+      await harness.runAttempt({ ...params, workspaceDir: bootstrapWorkspace, prompt: "next" });
+      const turns = (await readFile(log, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((request) => request.method === "turn/start");
+      expect(turns).toHaveLength(2);
+      expect(turns[0].params.input[0].text).toContain("Speak like a patient astronomer.");
+      expect(turns[1].params.input[0].text).toBe("next");
+    } finally {
+      await harness.dispose?.();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("fails visibly without dispatching a turn when retained context cannot be read", async () => {
+    const { harness, params, bindings } = setup();
+    const log = join(workspace, `${params.runId}.jsonl`);
+    readHistory.mockRejectedValueOnce(new Error("Session context limit exceeded"));
+    vi.stubEnv("MUSE_REQUEST_LOG", log);
+    try {
+      const result = await harness.runAttempt(params);
+      expect(terminal(result)).toMatchObject({
+        kind: "failed",
+        error: expect.objectContaining({
+          message: expect.stringContaining("could not restore OpenClaw session context"),
+        }),
+      });
+      expect(await readFile(log, "utf8")).not.toContain('"method":"turn/start"');
+      expect(bindings.has(params.sessionId)).toBe(false);
+    } finally {
+      await harness.dispose?.();
+      vi.unstubAllEnvs();
+    }
+  });
 
   it("forwards prepared images to the native turn", async () => {
     const { harness, params } = setup();
