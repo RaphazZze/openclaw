@@ -343,6 +343,7 @@ export const sessionCompanionHandlers: GatewayRequestHandlers = {
           key: target.sessionKey,
           agentId: target.agentId,
           projection: "list",
+          includeMembership: true,
         },
         (selected, members, assertCurrent) => {
           assertCurrent();
@@ -350,7 +351,11 @@ export const sessionCompanionHandlers: GatewayRequestHandlers = {
           if (
             !companionTargetIsVisible(client, context, {
               target: match ? { storeKey: match.key, entry: match.entry } : null,
-              membership: new Set(members.map((member) => member.identityId)),
+              membership: new Set(
+                (members.get(match?.key ?? selected.canonicalKey) ?? []).map(
+                  (member) => member.identityId,
+                ),
+              ),
               profiles,
             })
           ) {
