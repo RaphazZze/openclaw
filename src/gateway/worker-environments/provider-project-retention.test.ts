@@ -250,4 +250,21 @@ describe("prepared project retention compatibility", () => {
     expect(await owner.prepareRetention(record, fixture.abort.signal)).toBeUndefined();
     expect(sourceAdmission).not.toHaveBeenCalled();
   });
+
+  it("reports why activation demand cannot refill after runtime artifacts change", async () => {
+    const { record, owner, artifacts } = await setup();
+    const activated = await fixture.attach(await fixture.ready(record));
+    artifacts.workerArchiveSha256 = "1".repeat(64);
+    const warn = vi.fn();
+    await fixture
+      .pool({
+        prepareRetention: owner.prepareRetention,
+        warn,
+      })
+      .maintain(activated.environmentId);
+    expect(fixture.reserves()).toEqual([]);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "Prepared worker refill skipped (development, retained): runtime artifacts or preparation identity changed",
+    );
+  });
 });

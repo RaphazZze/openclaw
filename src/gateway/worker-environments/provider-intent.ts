@@ -302,11 +302,19 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
   // Retention checks immutable contents against local policy/runtime facts.
   // Unknown observations throw; only confirmed incompatibility returns undefined/false.
   // This closure cannot authorize an allocation or claim private source.
-  const prepareRetention = async (record: WorkerEnvironmentRecord, signal?: AbortSignal) => {
+  const prepareRetention = async (
+    record: WorkerEnvironmentRecord,
+    signal?: AbortSignal,
+    onInvalid?: (reason: string) => void,
+  ) => {
+    const invalid = (reason: string) => {
+      onInvalid?.(reason);
+      return undefined;
+    };
     const project = readWorkerProjectSnapshot(record.profileSnapshot.project);
     const preparation = readWorkerPreparation(record.profileSnapshot);
     if (!preparation || !options.prepareNodeArtifacts || !options.projectNamespace) {
-      return undefined;
+      return invalid("preparation runtime is unavailable");
     }
     const createOptions: WorkerProviderIntentPreparationOptions = {
       machineClass:
@@ -338,7 +346,7 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
         allocationSnapshot(record.profileSnapshot, createOptions),
       )
     ) {
-      return undefined;
+      return invalid("configured profile changed");
     }
     const isSourceOwnerCurrent = () => {
       const sourceConfig = options.getConfig();
@@ -369,14 +377,14 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
       return true;
     };
     if (!isSourceOwnerCurrent()) {
-      return undefined;
+      return invalid("repository owner changed");
     }
     if (
       project &&
       "source" in project &&
       !(await matchesAgentLifecycleBindingAsync(options.getConfig, project.source.owner.agent))
     ) {
-      return undefined;
+      return invalid("repository agent changed");
     }
     const resolved = resolveProfile(record.profileId, createOptions);
     const { provider, providerId, profileSnapshot } = resolved;
@@ -393,7 +401,7 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
       !provider.requiresNodeEnrollment ||
       !provider.supportsProjectPreparation?.(profile, createOptions.machineClass, createOptions.os)
     ) {
-      return undefined;
+      return invalid("provider preparation target changed");
     }
     const prepared = await options.prepareNodeArtifacts(profileSnapshot, signal);
     const isCurrent = () =>
@@ -402,7 +410,7 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
         !("source" in project) ||
         matchesAgentLifecycleBinding(options.getConfig(), project.source.owner.agent));
     if (!isCurrent()) {
-      return undefined;
+      return invalid("repository owner changed during retention");
     }
     const observed = createWorkerPreparationIdentity({
       namespace: options.projectNamespace,
@@ -417,7 +425,7 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
     });
     return isDeepStrictEqual(project ? observed : { source: "empty", ...observed }, preparation)
       ? { isCurrent }
-      : undefined;
+      : invalid("runtime artifacts or preparation identity changed");
   };
 
   const createWithProfile = async (

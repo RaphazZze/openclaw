@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { requireGit } from "../../agents/worktrees/git.js";
 import { RECEIPT, usePreparedPoolFixture } from "./prepared-pool.test-support.js";
 import { createWorkerProviderIntent } from "./provider-intent.js";
@@ -62,8 +62,9 @@ describe("empty workspace prepared worker reserves", () => {
     });
   }
 
-  function createPool(owner: ReturnType<typeof createIntentOwner>) {
+  function createPool(owner: ReturnType<typeof createIntentOwner>, warn = vi.fn()) {
     return fixture.pool({
+      warn,
       prepareIntent: owner.prepareIntent,
       prepareRetention: owner.prepareRetention,
       assertIntentCurrent: owner.assertPreparedIntentCurrent,
@@ -179,7 +180,8 @@ describe("empty workspace prepared worker reserves", () => {
           executionMode: "worker-turn",
         }),
       );
-      const pool = createPool(owner);
+      const warn = vi.fn();
+      const pool = createPool(owner, warn);
       await pool.maintain(source.environmentId);
       expect(fixture.reserves()).toHaveLength(1);
       const spare = fixture.reserves()[0]!;
@@ -191,9 +193,15 @@ describe("empty workspace prepared worker reserves", () => {
         fixture.config.cloudWorkers!.preparedPool = { maxTotal: 0 };
       }
       await fixture.schedule(pool);
+      await fixture.schedule(pool);
 
       expect(fixture.store.get(spare.environmentId)?.state).toBe("destroyed");
       expect(fixture.reserves().filter((record) => record.state === "ready")).toEqual([]);
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        expect.stringContaining(
+          `: profile removed or capacity disabled (readyWorkers=${policy === "readyWorkers" ? 0 : 1}, maxTotal=${policy === "maxTotal" ? 0 : 4})`,
+        ),
+      );
     },
   );
 });

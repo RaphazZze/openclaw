@@ -182,7 +182,13 @@ Deferred workers remain counted against capacity, and no new preparation runs
 until the observations succeed. Confirmed profile, source-owner, or runtime
 changes still retire incompatible workers. A failed refill does not discard an
 independently verified ready worker. Session dispatch always performs fresh
-admission before consuming a reserve.
+admission before consuming a reserve. When demand cannot refill, the Gateway logs
+one concise reason with the profile and source environment ID, including disabled
+capacity (with the effective `readyWorkers` and `maxTotal`), expiry, profile or runtime
+changes, and deferred provider observations. If no reserve appears after activation,
+check these limits first: an explicit zero overrides the defaults. Unchanged
+reasons stay quiet on subsequent passes; a changed reason or recurrence after
+recovery logs again.
 
 Prepared-project images record foreground demand only after successful session
 activation. Failed enrollment or dispatch does not renew image demand. A newly

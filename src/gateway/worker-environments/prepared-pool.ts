@@ -17,9 +17,28 @@ export function createPreparedWorkerPool(options: pool.PoolOptions) {
   let presenceInFlight: Promise<void> | undefined;
   let presenceAdmitted = false;
   const preparations = new Map<string, AbortController>();
+  let previousDiagnostics = new Set<string>();
   const presence = createPreparedPoolPresence({ ...options, schedule: () => schedule() });
-  const runPass = () =>
-    runPreparedPoolPass(options, presence, preparations, () => presenceAdmitted);
+  const runPass = async () => {
+    const diagnostics = new Set<string>();
+    try {
+      await runPreparedPoolPass(
+        options,
+        presence,
+        preparations,
+        () => presenceAdmitted,
+        (message) => {
+          if (!diagnostics.has(message) && !previousDiagnostics.has(message)) {
+            options.warn(message);
+          }
+          diagnostics.add(message);
+        },
+      );
+    } finally {
+      // Repeat only after recovery or a changed reason; retain at most one pass's diagnostics.
+      previousDiagnostics = diagnostics;
+    }
+  };
   const scheduleInventory = () => {
     if (signal.aborted) {
       return Promise.resolve();

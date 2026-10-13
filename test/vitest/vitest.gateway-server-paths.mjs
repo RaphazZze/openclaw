@@ -360,6 +360,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/worker-environments/placement-dispatch-device.test.ts",
   "src/gateway/worker-environments/placement-dispatch-move-recovery.test.ts",
   "src/gateway/worker-environments/placement-dispatch-prepared.test.ts",
+  "src/gateway/worker-environments/placement-empty-reserve.test.ts",
   "src/gateway/worker-environments/placement-dispatch-reclaim.test.ts",
   "src/gateway/worker-environments/placement-dispatch-recovery-admission.test.ts",
   "src/gateway/worker-environments/placement-dispatch-recovery.test.ts",

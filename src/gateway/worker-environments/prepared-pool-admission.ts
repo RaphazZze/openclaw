@@ -87,11 +87,17 @@ export type PassContext = Readonly<{
   presenceDeferred: boolean;
   inventory: readonly Environment[];
   oldestFirst: readonly Environment[];
+  reportRefill: (message: string) => void;
 }>;
+export function skipRefill(ctx: PassContext, source: Environment, reason: string): void {
+  ctx.reportRefill(
+    `Prepared worker refill skipped (${source.profileId}, ${source.environmentId}): ${reason}`,
+  );
+}
 export function deferGeneration(ctx: PassContext, generation: Generation, error: unknown): void {
   generation.deferred = true;
-  ctx.options.warn(
-    `Prepared worker maintenance deferred (${generation.source.profileId}); retaining unused capacity until its original expiry: ${boundedWorkerError(error)}`,
+  ctx.reportRefill(
+    `Prepared worker maintenance deferred (${generation.source.profileId}, ${generation.source.environmentId}); retaining unused capacity until its original expiry: ${boundedWorkerError(error)}`,
   );
 }
 export function admitSources(ctx: PassContext): Generations {
@@ -157,6 +163,11 @@ export function admitSources(ctx: PassContext): Generations {
       (limits.target === 0 && !buildingKeys.has(key)) ||
       limits.maxTotal === 0
     ) {
+      skipRefill(
+        ctx,
+        record,
+        `profile removed or capacity disabled (readyWorkers=${limits.target}, maxTotal=${limits.maxTotal})`,
+      );
       continue;
     }
     const preparationKey = readWorkerPreparation(record.profileSnapshot)!.key;
@@ -197,6 +208,8 @@ export function admitSources(ctx: PassContext): Generations {
           deferred: Boolean(presenceOwned && deferred && !activationEligible),
           activationEligible,
         });
+      } else {
+        skipRefill(ctx, record, "activation demand expired or provider idle policy is ineligible");
       }
     } catch (error) {
       signal.throwIfAborted();
