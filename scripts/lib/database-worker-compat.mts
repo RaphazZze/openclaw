@@ -75,7 +75,6 @@ const reviewed = new Map<string, readonly string[]>([
     "extensions/imessage/src/conversation-bindings.ts",
     ["createIMessageConversationBindingManager"],
   ],
-  ["src/channels/plugins/binding-routing.ts", ["resolveRuntimeConversationBindingRoute"]],
   ["extensions/matrix/auth-presence.ts", ["hasAnyMatrixAuth"]],
   [
     "src/agents/harness/native-session/binding-lifecycle.ts",
@@ -103,12 +102,7 @@ const reviewedMembers = new Map<string, readonly string[]>([
   ],
   [
     "src/infra/outbound/account-scoped-conversation-bindings.ts",
-    [
-      "createAccountBindingManager.listBySession",
-      "createAccountBindingManager.resolveByConversation",
-      "createAccountBindingManager.touch",
-      "createAccountBindingManager.inspectByConversation",
-    ],
+    ["createAccountBindingManager.listBySession", "createAccountBindingManager.touch"],
   ],
   [
     "src/agents/harness/host-capability.ts",
@@ -131,7 +125,6 @@ const reviewedMembers = new Map<string, readonly string[]>([
     [
       "DEFAULT_SESSION_BINDING_SERVICE.listBySession",
       "DEFAULT_SESSION_BINDING_SERVICE.resolveByConversation",
-      "DEFAULT_SESSION_BINDING_SERVICE.touch",
     ],
   ],
   [
@@ -790,6 +783,7 @@ export function inspectDatabaseWorkerBoundaries(
     }
   }
   const handledImports = new Set<ts.Node>();
+  const handledImportBindings = new Set<ts.Node>();
   for (const binding of bindings) {
     const initializer = binding.initializer!;
     const expression = ts.isAwaitExpression(initializer) ? initializer.expression : initializer;
@@ -807,6 +801,7 @@ export function inspectDatabaseWorkerBoundaries(
       const local = checker.getSymbolAtLocation(name);
       if (local && target) {
         forwarded.set(local, target);
+        handledImportBindings.add(name);
         if (targets(target).size) {
           names.add(name.text);
         }
@@ -918,6 +913,7 @@ export function inspectDatabaseWorkerBoundaries(
             !handledImports.has(node.parent) &&
             !selectsImportMember(node.parent))) &&
         !declarationNames.has(node) &&
+        !handledImportBindings.has(node) &&
         !declarations.has(node.parent) &&
         !(
           ts.isBindingElement(node.parent) &&

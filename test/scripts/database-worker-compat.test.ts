@@ -133,6 +133,15 @@ it("permits a deprecated API only from an exact reviewed one-shot entry", () => 
           : undefined,
     );
   expect(inspectDoctor(doctorFile, doctor).violations).toEqual([]);
+  expect(
+    inspectDoctor(
+      doctorFile,
+      `export async function collectAgentRuntimeToolSchemaFindings() {
+        const { ${first} } = await import('../plugin-sdk/sqlite-runtime-legacy.js');
+        return ${first}();
+      }`,
+    ).violations,
+  ).toEqual([]);
   for (const [file, source] of [
     [doctorFile, doctor.replace("collectAgentRuntimeToolSchemaFindings", "unreviewed")],
     ["src/flows/unreviewed.ts", doctor],
