@@ -1,7 +1,7 @@
 import { StatementSync } from "node:sqlite";
 import { expect, it } from "vitest";
 import { observeSqliteReadSql } from "../../test/helpers/sqlite-statement-execution-counter.js";
-import { writeConfigMachineStateAsync } from "../state/config-machine-state-write-async.js";
+import { writeConfigMachineStateAsync } from "../state/config-machine-state-async.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { resolveCronJobsStorePathFromConfigAsync } from "./store/paths.js";
 

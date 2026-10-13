@@ -31,12 +31,9 @@ vi.mock("../version.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../version.js")>()),
   VERSION: "1.0.0",
 }));
-// mock-isolation: An absent fixture row keeps update throttling independent of shared SQLite state.
+// mock-isolation: Synthetic update checks keep reads and writes independent of shared SQLite state.
 vi.mock("../state/config-machine-state-async.js", () => ({
   readConfigMachineStateAsync: vi.fn(async () => null),
-}));
-// mock-isolation: Synthetic update checks must not persist attempts into shared SQLite state.
-vi.mock("../state/config-machine-state-write-async.js", () => ({
   writeConfigMachineStateAsync: vi.fn(async () => {}),
 }));
 vi.mock("../model-catalog/remote-config.js", async (importOriginal) => ({

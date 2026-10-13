@@ -42,6 +42,10 @@ import {
   tryBeginGatewayRootWorkAdmission,
 } from "../../../process/gateway-work-admission.js";
 import { isWebchatClient } from "../../../utils/message-channel.js";
+import {
+  assertRemoteControlUiIngressCurrent,
+  getRemoteControlUiIngressContext,
+} from "../../ingress-attribution.js";
 import { isLocalishHost, isLoopbackAddress } from "../../net.js";
 import { resolveNodePairingClientIpSource } from "../../node-pairing-auto-approve.js";
 import {
@@ -77,6 +81,7 @@ function claimsWorkerConnectionIdentity(value: unknown): boolean {
 }
 
 export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerParams) {
+  const remoteIngress = getRemoteControlUiIngressContext(params.upgradeReq);
   let waitingForPairing = false;
   const {
     socket,
@@ -104,6 +109,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
 
   const sendFrame = async (obj: unknown): Promise<void> =>
     await new Promise<void>((resolve, reject) => {
+      assertRemoteControlUiIngressCurrent(remoteIngress);
       socket.send(JSON.stringify(obj), (err) => {
         if (err) {
           reject(err);
@@ -350,6 +356,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
             origin: requestOrigin,
             isLocalClient,
             enforceOriginCheckForAnyClient,
+            remoteControlUiIngress: remoteIngress,
           }),
           browserRateLimitClientIp,
           authRateLimiter,
@@ -547,6 +554,12 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
   }
 
   const onMessage = (data: GatewayConnectionFrame): void => {
+    try {
+      assertRemoteControlUiIngressCurrent(remoteIngress);
+    } catch {
+      close(1008, "remote Control UI ingress closed");
+      return;
+    }
     if (isClosed()) {
       return;
     }

@@ -1,6 +1,8 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { readVoiceWakeMachineState } from "../state/config-machine-state-async.js";
-import { writeConfigMachineStateAsync } from "../state/config-machine-state-write-async.js";
+import {
+  readVoiceWakeMachineState,
+  writeConfigMachineStateAsync,
+} from "../state/config-machine-state-async.js";
 
 // Voice wake config stores trigger words used by local voice integrations.
 type VoiceWakeConfig = {
