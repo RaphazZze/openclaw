@@ -5,14 +5,12 @@ import { serialize } from "node:v8";
 import { sliceUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { BrokerChild } from "../process/spawn-broker/child.js";
-import type { SpawnBrokerHost } from "../process/spawn-broker/host.js";
 import { recordChildProcessSpawn } from "../process/spawn-diagnostics.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { runInDetachedAsyncContext } from "../shared/detached-async-context.js";
 import { registerOpenClawAgentDatabaseReadCandidateResource } from "../state/openclaw-agent-db-resources.js";
 import { racePromiseWithAbortSignal } from "./abort-signal.js";
 import { getSqliteRuntimeCapabilities } from "./bun-sqlite-library.js";
-import type { RuntimeWorkerGeneration } from "./runtime-worker-generation.js";
 import { tryProcessCwd } from "./safe-cwd.js";
 import { createSqliteLifecycleAggregateError } from "./sqlite-lifecycle-errors.js";
 import { captureSqliteAuthSchema } from "./sqlite-readonly-auth-schema.js";
@@ -38,14 +36,11 @@ import {
   type SqliteReadOnlyWorkerOptions,
   type SqliteReadOnlyWorkerValue,
 } from "./sqlite-readonly-worker-protocol.js";
+import type {
+  SqliteReadOnlyWorkerLaunch,
+  SqliteReadOnlyWorkerSession,
+} from "./sqlite-readonly-worker-session-types.js";
 import { classifyWorkerRequest, trackWorkerRequest } from "./worker-request-diagnostics.js";
-
-export type SqliteReadOnlyWorkerLaunch = {
-  runtimeGeneration?: RuntimeWorkerGeneration;
-  env: NodeJS.ProcessEnv;
-  cwd: string;
-  transport: { kind: "native" } | { kind: "broker"; owner: SpawnBrokerHost };
-};
 
 export function isSameSqliteReadOnlyWorkerLaunch(
   captured: SqliteReadOnlyWorkerLaunch,
@@ -63,20 +58,6 @@ export function isSameSqliteReadOnlyWorkerLaunch(
     keys.every((key) => requested.env[key] === captured.env[key])
   );
 }
-
-type SqliteReadOnlyWorkerSession = {
-  readonly closed: Promise<void>;
-  readonly notStarted: boolean;
-  createNativeReplacement: () => SqliteReadOnlyWorkerSession;
-  isRetired: () => boolean;
-  compatible: (launch: SqliteReadOnlyWorkerLaunch) => boolean;
-  run: (
-    pathname: string,
-    options: SqliteReadOnlyWorkerOptions,
-  ) => Promise<SqliteReadOnlyWorkerValue>;
-  setIdle: (idle: boolean) => void;
-  close: () => Promise<void>;
-};
 
 export function createSqliteReadOnlyWorkerSession(
   host: SqliteReadOnlyWorkerLaunch & {
@@ -523,7 +504,7 @@ export function createSqliteReadOnlyWorkerPool(
         scopedReadWorkers.push(slot);
       }
       slot ??= available.find((candidate) => candidate.queued === 0 && !candidate.session);
-      slot ??= available.reduce<typeof slot>(
+      slot ??= available.reduce<(typeof scopedReadWorkers)[number] | undefined>(
         (best, candidate) => (!best || candidate.queued < best.queued ? candidate : best),
         undefined,
       );

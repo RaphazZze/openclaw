@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { createSqliteReadOnlyWorkerSession } from "./sqlite-readonly-worker-session.js";
+import type { SqliteReadOnlyWorkerSession } from "./sqlite-readonly-worker-session-types.js";
 
 export type SqliteReadOnlyWorkerScope = {
   active: boolean;
@@ -7,7 +7,7 @@ export type SqliteReadOnlyWorkerScope = {
   controller: AbortController;
   pending: Set<Promise<unknown>>;
   deadlineOwnedByCaller: boolean;
-  worker?: ReturnType<typeof createSqliteReadOnlyWorkerSession>;
+  worker?: SqliteReadOnlyWorkerSession;
   releaseReadWorker?: () => Promise<void>;
 };
 export const readOnlyWorkerScope = new AsyncLocalStorage<SqliteReadOnlyWorkerScope>();

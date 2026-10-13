@@ -34,10 +34,10 @@ import {
   type SqliteReadOnlyOperationOptions,
   type SqliteAuthProfileRows,
 } from "./sqlite-readonly-worker-protocol.js";
+import type { SqliteReadOnlyWorkerLaunch } from "./sqlite-readonly-worker-session-types.js";
 import {
   createSqliteReadOnlyWorkerSession,
   createSqliteReadOnlyWorkerPool,
-  type SqliteReadOnlyWorkerLaunch,
 } from "./sqlite-readonly-worker-session.js";
 
 const SLOW_HARDWARE_HEADROOM = 10;
