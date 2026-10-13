@@ -651,6 +651,7 @@ test.each(["idle", "active"] as const)(
         ?.clean_close,
     ).toBe(1);
     if (timing === "active") {
+      // A reader during native retirement can block its nonwaiting checkpoint.
       expect(loadSessionEntryReadOnly(fixture.scopes[1]!)).toBeUndefined();
     }
     resetGatewayWorkAdmission();
