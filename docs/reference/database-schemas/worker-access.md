@@ -121,6 +121,12 @@ Pruning uses that count and one bounded oldest-row delete. Unbounded replacement
 writes may overestimate this disposable cache and evict entries early; bounded
 writes still reserve space before insertion.
 
+Memory managers receive schema, table-presence, and index facts from worker
+admission without opening a host reader. Bundled status callers await the same
+retrieval worker through `readMemorySearchManagerStatus`. The released synchronous
+`status()` method remains deprecated compatibility and opens its native reader
+only when explicitly called; it is not a fallback for worker failures.
+
 ## Final authority without SQL
 
 Cached data and permission are different contracts. Credentials, approvals,
