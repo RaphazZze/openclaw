@@ -5,7 +5,6 @@ import { observeHostDataSql } from "../../test/helpers/sqlite-statement-executio
 import { resetConfigRuntimeState, setRuntimeConfigSnapshot } from "../config/config.js";
 import { loadCombinedSessionStoreForGatewayCore } from "../config/sessions/combined-store-gateway.js";
 import { loadSessionEntry, replaceSessionEntry } from "../config/sessions/session-accessor.js";
-import * as sessionAccessor from "../config/sessions/session-accessor.js";
 import { memorySessionActorOwners } from "../config/sessions/session-actor-memory-owner.js";
 import {
   addSessionMember,
@@ -44,7 +43,6 @@ import type {
   RespondFn,
 } from "./server-methods/types.js";
 import { getSessionRowProjection } from "./session-row-projection-access.js";
-import { createGatewaySessionEntryReader } from "./session-utils-store-lineage.native.js";
 import {
   resolveGatewaySessionStoreTargetWithStoreAsync,
   withGatewaySessionStoreTarget,
@@ -181,29 +179,15 @@ describe("global session lookup ownership", () => {
       const failingPreparedRead = vi.fn(() => {
         throw failure;
       });
-      const failingSingleRead = vi
-        .spyOn(sessionAccessor, "loadExactSessionEntryCandidates")
-        .mockImplementation(() => {
-          throw failure;
-        });
-      try {
-        await expect(
-          resolveGatewaySessionStoreTargetWithStoreAsync({
-            cfg,
-            key: "agent:main:main",
-            exactRead: true,
-            readStore: failingPreparedRead,
-          }),
-        ).rejects.toThrow(failure);
-        expect(failingPreparedRead).toHaveBeenCalledOnce();
-        failingSingleRead.mockClear();
-        const readParent = createGatewaySessionEntryReader({ cfg, agentId: "main", store: {} });
-        expect(() => readParent("agent:research:main")).toThrow(failure);
-        // A failed exact read must not become absence followed by an alias lookup.
-        expect(failingSingleRead).toHaveBeenCalledOnce();
-      } finally {
-        failingSingleRead.mockRestore();
-      }
+      await expect(
+        resolveGatewaySessionStoreTargetWithStoreAsync({
+          cfg,
+          key: "agent:main:main",
+          exactRead: true,
+          readStore: failingPreparedRead,
+        }),
+      ).rejects.toThrow(failure);
+      expect(failingPreparedRead).toHaveBeenCalledOnce();
     });
   });
 
@@ -780,20 +764,6 @@ it.each([
         .resolves.toMatchObject({ sessionInfo: expected });
       const allAgents = await listSessions({ client, context, request: { limit: 20 } });
       expect(allAgents.sessions.find((row) => row.key === created.key)).toMatchObject(expected);
-
-      const cachedRequest = {
-        cfg,
-        key: created.key,
-        agentId: "work",
-        readOnly: true,
-        exactRead: true,
-        storeCache: new Map(),
-      };
-      await resolveGatewaySessionStoreTargetWithStoreAsync(cachedRequest);
-      const cached = await resolveGatewaySessionStoreTargetWithStoreAsync(cachedRequest);
-      expect(createGatewaySessionEntryReader({ cfg, ...cached })("global")?.modelOverride).toBe(
-        "qwen3:14b",
-      );
     });
   },
 );

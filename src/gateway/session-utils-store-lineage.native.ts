@@ -1,6 +1,5 @@
 // Native lineage for deprecated synchronous SDK compatibility and incognito-only projection.
 
-import type { SessionEntryReadSource } from "../config/sessions/session-entry-read-source.types.js";
 import { captureSessionEntryMetadataRead } from "../config/sessions/session-entry-source-authority.js";
 import { createExistingAgentSessionStoreTargetResolver } from "../config/sessions/targets-discovery.native.js";
 import type { SessionEntry } from "../config/sessions/types.js";
@@ -11,7 +10,7 @@ import {
   parseAgentSessionKey,
 } from "../routing/session-key.js";
 import { createOpenClawAgentDatabasePathMatcher } from "../state/openclaw-agent-db.paths.js";
-import { resolveSessionStoreIdentity, selectStoredSessionLineage } from "./session-store-key.js";
+import { resolveSessionStoreIdentity } from "./session-store-key.js";
 import {
   resolveGatewaySessionStoreCandidates,
   type GatewaySessionStoreDiscoveryCache,
@@ -20,7 +19,6 @@ import {
   resolveNativeGatewaySessionStoreTargetWithStore,
   type GatewaySessionStoreLookupParams,
 } from "./session-utils-store-lookup.js";
-import { readGatewaySessionStore } from "./session-utils-store-read.js";
 
 /** Stored-address joins share discovery without passing selected keys through request aliases. */
 export function createGatewaySessionLineageReader(cfg: OpenClawConfig) {
@@ -93,37 +91,4 @@ export function createGatewaySessionLineageReader(cfg: OpenClawConfig) {
     return resolveNativeGatewaySessionStoreTargetWithStore(params).store[key];
   };
   return { readStored, readAlias };
-}
-
-/** Exact row owners supply missing parent facts without expanding their selected store. */
-export function createGatewaySessionEntryReader(params: {
-  cfg: OpenClawConfig;
-  agentId: string;
-  store: Record<string, SessionEntry>;
-  readSource?: SessionEntryReadSource;
-}): (key: string) => SessionEntry | undefined {
-  const reader = createGatewaySessionLineageReader(params.cfg);
-  return (key) => {
-    if (params.store[key]) {
-      return params.store[key];
-    }
-    if (key === "global" || key === "unknown") {
-      const readSource = params.readSource;
-      if (!readSource) {
-        return undefined;
-      }
-      return readGatewaySessionStore({
-        agentId: readSource.agentId,
-        storePath: readSource.path,
-        options: { readSource, readOnly: true, exactKeys: [key], projection: "list" },
-      })[key];
-    }
-    return selectStoredSessionLineage({
-      cfg: params.cfg,
-      agentId: params.agentId,
-      sessionKey: key,
-      read: reader.readStored,
-      readAlias: () => reader.readAlias(key, params.agentId),
-    }).value;
-  };
 }
