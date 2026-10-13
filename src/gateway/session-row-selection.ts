@@ -36,7 +36,7 @@ export function createSessionRowSelection(
   const relatedInvolvements = new Map<string, Set<string>>();
   const rowInvolvements = new Map<string, { personal: Set<string>; related: Set<string> }>();
   const changedInvolvements = new Set<string>();
-  const configuredAgentIds = scope.configuredAgentIds ?? new Set(listAgentIds(cfg));
+  let configuredAgentIds = scope.configuredAgentIds;
   let involvementRevision: object | undefined;
   const removeInvolvement = (key: string) => {
     const previous = rowInvolvements.get(key);
@@ -58,6 +58,7 @@ export function createSessionRowSelection(
     rowInvolvements.delete(key);
   };
   const prepareInvolvements = () => {
+    configuredAgentIds ??= new Set(listAgentIds(cfg));
     const context = getContext();
     const revision = context.identityProjection?.revision ?? context.userProfileIdentityById;
     if (involvementRevision !== revision) {
