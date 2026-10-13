@@ -1005,18 +1005,18 @@ describe("session sharing policy", () => {
               : {}),
           });
         for (const [recipient, event, visible] of recipients) {
-          expect(await check(recipient, event), `${visibility}: ${event}`).toBe(visible);
+          expect(check(recipient, event), `${visibility}: ${event}`).toBe(visible);
         }
         if (visibility === "suggest") {
           const recipient = client({ user: "author", displayName: "Viewer" });
           recipient.internal = { operatorRoleActor: { kind: "operator", profileId: "viewer" } };
-          expect(await check(recipient, "session.suggestion")).toBe(true);
+          expect(check(recipient, "session.suggestion")).toBe(true);
           recipient.authenticatedUserProfile!.profileId = "viewer";
-          expect(await check(recipient, "session.suggestion")).toBe(false);
+          expect(check(recipient, "session.suggestion")).toBe(false);
           recipient.internal.operatorRoleActor = { kind: "operator", profileId: "author" };
-          expect(await check(recipient, "session.suggestion")).toBe(false);
+          expect(check(recipient, "session.suggestion")).toBe(false);
           recipient.authenticatedUserProfile = undefined;
-          expect(await check(recipient, "session.suggestion")).toBe(true);
+          expect(check(recipient, "session.suggestion")).toBe(true);
         }
       }
     });

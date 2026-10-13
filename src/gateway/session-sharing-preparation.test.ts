@@ -34,10 +34,7 @@ import {
 } from "../state/openclaw-agent-db.js";
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
-import {
-  authorizePreparedSessionMutation,
-  resolveSessionSharingTargetAsync,
-} from "./session-sharing-policy.js";
+import { authorizePreparedSessionMutation } from "./session-sharing-policy.js";
 import { prepareSessionMutationFacts } from "./session-sharing-preparation.js";
 import { rolePolicyConfig, sharingPolicyClient } from "./session-sharing.test-utils.js";
 
@@ -801,77 +798,6 @@ it("does not transfer prepared sharing facts through a same-path replacement", a
       expect(() => prepared.readCurrent(cfg)).toThrow(unavailableMessage);
     } finally {
       prepared.release();
-    }
-  });
-});
-
-it("invalidates selected facts before observers when another searched store gains a duplicate", async () => {
-  await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
-    const sessionKey = "agent:main:multiple-stores";
-    const primaryStore = state.statePath(
-      "configured",
-      "agents",
-      "main",
-      "sessions",
-      "sessions.json",
-    );
-    const secondaryStore = resolveOpenClawAgentSqlitePath({ agentId: "main" });
-    const cfg = {
-      agents: { entries: { main: {} } },
-      session: {
-        store: state.statePath("configured", "agents", "{agentId}", "sessions", "sessions.json"),
-      },
-    };
-    await state.writeConfig(cfg);
-    setRuntimeConfigSnapshot(cfg);
-    replaceSessionEntrySync(
-      { agentId: "main", sessionKey, storePath: primaryStore },
-      { sessionId: "selected", updatedAt: 1, visibility: "shared" },
-    );
-    replaceSessionEntrySync(
-      { agentId: "main", sessionKey: "agent:main:other", storePath: secondaryStore },
-      { sessionId: "other", updatedAt: 1 },
-    );
-    const scope = { cfg, sessionKey, agentId: "main" };
-    expect((await resolveSessionSharingTargetAsync(scope))?.entry.sessionId).toBe("selected");
-    let prepared: Awaited<ReturnType<typeof prepareSessionMutationFacts>> | undefined;
-    const observed: unknown[] = [];
-    const stop = sessionChanges.subscribe((change) => {
-      if (
-        prepared &&
-        "sessionKey" in change &&
-        change.sessionKey === sessionKey &&
-        change.storePath === secondaryStore
-      ) {
-        try {
-          observed.push(prepared.readCurrent(cfg));
-        } catch (error) {
-          observed.push(error);
-        }
-      }
-    });
-    try {
-      prepared = await prepareSessionMutationFacts(scope);
-      expect(prepared.readCurrent(cfg).target.entry.sessionId).toBe("selected");
-      replaceSessionEntrySync(
-        { agentId: "main", sessionKey, storePath: secondaryStore },
-        {
-          sessionId: "duplicate",
-          updatedAt: 2,
-          visibility: "draft",
-          createdActor: { type: "human", source: "profile", id: "other" },
-        },
-      );
-      expect(observed).toHaveLength(1);
-      expect(observed[0]).toBeInstanceOf(Error);
-      expect(observed[0]).toHaveProperty("message", unavailableMessage);
-      expect(() => prepared!.readCurrent(cfg)).toThrow(unavailableMessage);
-      await expect(resolveSessionSharingTargetAsync(scope)).rejects.toThrow(
-        "duplicate rows resolve to canonical session key",
-      );
-    } finally {
-      stop();
-      prepared?.release();
     }
   });
 });

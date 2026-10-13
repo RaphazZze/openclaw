@@ -445,7 +445,6 @@ describe("worker placement dispatch authority", () => {
         if (!result.authorization) {
           throw new Error("dispatch fixture did not admit its session member");
         }
-        using _ = { [Symbol.dispose]: () => result.authorization?.release?.() };
         const revokeAt = (phase: string) => {
           if (phase === boundary) {
             expect(

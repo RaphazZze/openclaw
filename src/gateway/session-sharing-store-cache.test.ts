@@ -193,27 +193,27 @@ describe("session event authorization store work", () => {
         };
         expect(receive("member", "session.message")).toBe(true);
         materializedKeys.length = 0;
-        expect(await receive("member", "session.message")).toBe(true);
+        expect(receive("member", "session.message")).toBe(true);
         expect(materializedKeys).toEqual([]);
 
-        const checkRecipient = async (user: string, allowed: boolean) => {
+        const checkRecipient = (user: string, allowed: boolean) => {
           materializedKeys.length = 0;
-          expect(await receive(user)).toBe(allowed);
+          expect(receive(user)).toBe(allowed);
           // Sparse events must not enumerate unrelated rows; dense checks share one store view.
           expect(materializedKeys.length).toBeLessThanOrEqual(targetCount === 1 ? 0 : keys.length);
         };
-        await checkRecipient("member", true);
-        await checkRecipient("owner", true);
-        await checkRecipient("viewer", false);
-        await checkRecipient("author", true);
+        checkRecipient("member", true);
+        checkRecipient("owner", true);
+        checkRecipient("viewer", false);
+        checkRecipient("author", true);
         const revokedKey = sessionKeys.at(-1)!;
         removeSessionMember({ agentId: "main", sessionKey: revokedKey }, "member");
-        await checkRecipient("member", false);
+        checkRecipient("member", false);
         addSessionMember(
           { agentId: "main", sessionKey: revokedKey },
           { identityId: "member", addedBy: "owner" },
         );
-        await checkRecipient("member", true);
+        checkRecipient("member", true);
       });
     },
   );

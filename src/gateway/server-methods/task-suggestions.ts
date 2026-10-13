@@ -34,7 +34,6 @@ import { prepareSessionSharingProfiles } from "../session-sharing-read.js";
 import {
   prepareProjectedSessionSharing,
   createSessionListEntryFilter,
-  resolveSessionSharingTargetAsync,
 } from "../session-sharing.js";
 import { loadGatewaySessionEntryReadOnlyInWorker } from "../session-utils-store-worker.js";
 import {

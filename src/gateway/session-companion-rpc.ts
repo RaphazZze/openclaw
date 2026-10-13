@@ -40,8 +40,6 @@ import {
 } from "./session-sharing-read.js";
 import { prepareSessionSharingSource } from "./session-sharing-source.js";
 import { resolveRequestedSessionStoreTarget } from "./session-store-key.js";
-import { withGatewaySessionStoreTarget } from "./session-utils-store-lookup.js";
-import { findCanonicalStoreMatch } from "./session-utils-store-selection.js";
 import { captureGatewayClientUploadCommitGuard } from "./upload-policy.js";
 
 function resolveCompanionTarget(
@@ -337,37 +335,29 @@ export const sessionCompanionHandlers: GatewayRequestHandlers = {
         return;
       }
       const profiles = await prepareSessionSharingProfiles(client);
-      await withGatewaySessionStoreTarget(
-        {
-          cfg: context.getRuntimeConfig(),
-          key: target.sessionKey,
-          agentId: target.agentId,
-          projection: "list",
-          includeMembership: true,
-        },
-        (selected, members, assertCurrent) => {
-          assertCurrent();
-          const match = findCanonicalStoreMatch(selected.store, selected.storeKeys);
-          if (
-            !companionTargetIsVisible(client, context, {
-              target: match ? { storeKey: match.key, entry: match.entry } : null,
-              membership: new Set(
-                (members.get(match?.key ?? selected.canonicalKey) ?? []).map(
-                  (member) => member.identityId,
-                ),
-              ),
-              profiles,
-            })
-          ) {
-            respond(false, undefined, hiddenSessionNotFound(target.sessionKey));
-            return;
-          }
-          respond(
-            true,
-            target.companion.state({ agentId: target.agentId, sessionKey: target.sessionKey }),
-          );
-        },
-      );
+      const facts = await prepareSessionMutationFacts({
+        cfg: context.getRuntimeConfig(),
+        sessionKey: target.sessionKey,
+        agentId: target.agentId,
+        allowMissing: true,
+      });
+      try {
+        if (
+          !companionTargetIsVisible(client, context, {
+            ...facts.readCurrent(context.getRuntimeConfig()),
+            profiles,
+          })
+        ) {
+          respond(false, undefined, hiddenSessionNotFound(target.sessionKey));
+          return;
+        }
+        respond(
+          true,
+          target.companion.state({ agentId: target.agentId, sessionKey: target.sessionKey }),
+        );
+      } finally {
+        facts.release();
+      }
     },
   ),
   "sessions.companion.reset": defineValidatedGatewayHandler(
