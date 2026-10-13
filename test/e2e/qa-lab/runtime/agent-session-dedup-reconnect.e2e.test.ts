@@ -160,11 +160,13 @@ describe("agent session deduplication across reconnect", () => {
           OPENCLAW_TEST_MINIMAL_GATEWAY: "1",
         },
         mutateConfig: (config) => ({ ...config, plugins: { enabled: false } }),
-        onListening: () => {
-          stage = "gateway-ready";
+        onListening: ({ logs }) => {
+          gatewayLogs = logs;
+          stage = "gateway-listening";
         },
       });
       gatewayLogs = gateway.logs;
+      stage = "gateway-ready";
       cleanups.push(async () => provider.release());
 
       stage = "connect-client-a";
