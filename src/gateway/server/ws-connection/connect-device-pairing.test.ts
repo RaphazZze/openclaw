@@ -343,6 +343,7 @@ describe("gateway connect pairing exemptions", () => {
         ).run(person.id);
         publishUserProfilesChange(db, "gateway-owner", person.id);
       });
+
       started.ws.close();
       const logPath = path.join(path.dirname(stateDb.path), "owner-repair.log");
       setLoggerOverride({ level: "warn", consoleLevel: "silent", file: logPath });
