@@ -23,7 +23,10 @@ import {
 import { createOpenClawDatabaseMaintenanceScope } from "../../state/openclaw-state-db-async-lifecycle.js";
 import * as databaseMaintenance from "../../state/openclaw-state-db-async-lifecycle.js";
 import { loadSessionEntry } from "./session-accessor.js";
-import { writeSessionEntry } from "./session-accessor.sqlite-entry-store.js";
+import {
+  deleteSessionEntryRows,
+  writeSessionEntry,
+} from "./session-accessor.sqlite-entry-store.js";
 import { patchSessionEntryCore } from "./session-accessor.sqlite-entry.js";
 import { importSqliteSessionRowsBatch } from "./session-accessor.sqlite-import.js";
 import * as ageFacts from "./session-accessor.sqlite-maintenance-age.js";
@@ -218,6 +221,99 @@ it.each(["unlock", "insert", "policy"] as const)(
       expect(loadSessionEntry({ sessionKey: victimKey, storePath })?.archiveReason).toBe(
         "active-session-cap",
       );
+    }
+  },
+);
+
+it.for(["activity", "insert", "unlock", "remove", "policy"] as const)(
+  "settles a consumed protected-only worker plan after %s during result delivery",
+  async (change, { signal }) => {
+    const { request, scope, storePath, updatedAt, archived } = createStore(86_400_000, sessionKey, {
+      workerMaintenance: true,
+    });
+    request.maintenanceConfig.maxEntries = 1;
+    const protectedKey = "agent:main:durable-worker-protected";
+    const insertedKey = "agent:main:durable-worker-inserted";
+    runOpenClawAgentWriteTransaction((owner) => {
+      for (const key of [sessionKey, protectedKey]) {
+        writeSessionEntry(owner, key, { sessionId: key, updatedAt, modelSelectionLocked: true });
+      }
+    }, scope);
+    const writeActivity = () => {
+      runOpenClawAgentWriteTransaction((owner) => {
+        writeSessionEntry(owner, sessionKey, {
+          sessionId: sessionKey,
+          updatedAt: Date.now(),
+          modelSelectionLocked: true,
+          label: "ordinary activity",
+        });
+      }, scope);
+      kickSessionEntryMaintenanceAfterWrite(request);
+    };
+    const firstPass = createDeferred();
+    const nextPass = createDeferred();
+    const dispatch = vi.mocked(reclamationRun.runSqliteSessionReclamation);
+    const run = dispatch.getMockImplementation()!;
+    let delivered = false;
+    dispatch.mockImplementation(async (params) => {
+      const result = await run(params);
+      if (!delivered && result.kind === "maintenance-plan") {
+        expect(result.value.durableNoCandidates).toBe(true);
+        delivered = true;
+        if (change === "activity") {
+          writeActivity();
+        } else if (change === "policy") {
+          request.maintenanceConfig.maxEntries = 2;
+          kickSessionEntryMaintenanceAfterWrite(request);
+        } else {
+          runOpenClawAgentWriteTransaction((owner) => {
+            if (change === "remove") {
+              deleteSessionEntryRows(owner, protectedKey, { deleteOwnedWindows: true });
+            } else {
+              const key = change === "insert" ? insertedKey : protectedKey;
+              writeSessionEntry(owner, key, { sessionId: key, updatedAt });
+            }
+          }, scope);
+        }
+        firstPass.resolve();
+      } else if (delivered && result.kind === "maintenance-plan") {
+        nextPass.resolve();
+      }
+      return result;
+    });
+    kickSessionEntryMaintenanceAfterWrite(request);
+    await withinTest(firstPass.promise, signal);
+    await yieldToEventLoop();
+    const passes = countPlanningPasses();
+    if (change !== "activity") {
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(countPlanningPasses()).toBeGreaterThan(passes);
+      await withinTest(nextPass.promise, signal);
+      if (change === "insert" || change === "unlock") {
+        await withinTest(archived, signal);
+        expect(
+          loadSessionEntry({
+            storePath,
+            sessionKey: change === "insert" ? insertedKey : protectedKey,
+          })?.archiveReason,
+        ).toBe("active-session-cap");
+      } else if (change === "remove") {
+        expect(loadSessionEntry({ storePath, sessionKey: protectedKey })).toBeUndefined();
+      } else {
+        const latestPlan = dispatch.mock.calls
+          .map(([{ plan }]) => plan)
+          .findLast((plan) => plan.kind === "maintenance-plan");
+        expect(
+          latestPlan?.kind === "maintenance-plan" && latestPlan.input.maintenance.maxEntries,
+        ).toBe(2);
+      }
+      return;
+    }
+    for (let index = 0; index < 4; index++) {
+      writeActivity();
+      await yieldToEventLoop();
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(countPlanningPasses()).toBe(passes);
     }
   },
 );

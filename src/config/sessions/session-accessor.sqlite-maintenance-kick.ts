@@ -192,6 +192,9 @@ export function kickSessionEntryMaintenanceAfterWrite(
       unregister.push(
         observeSessionEntryMaintenanceAgeChanges(identity.key.slice(5), (change) => {
           created.ageFact = updateSessionEntryMaintenanceAgeFact(created.ageFact, change);
+          if (!created.ageFact) {
+            created.noCandidates = false;
+          }
           const previous = created.ageChanges.get(change.sessionKey);
           created.ageChanges.set(change.sessionKey, {
             ...change,
@@ -251,6 +254,8 @@ export function kickSessionEntryMaintenanceAfterWrite(
             return;
           }
           created.ageFact = undefined;
+          created.noCandidates = false;
+          created.generation += 1;
           if (!created.running) {
             scheduleImmediateMaintenance(databasePath, created);
           }
@@ -437,6 +442,21 @@ async function runPendingMaintenance(
   owner: SessionEntryMaintenanceOwner,
 ): Promise<void> {
   const isCurrent = () => isMaintenanceOwnerCurrent(databasePath, owner);
+  const hasCurrentNoCandidates = () =>
+    owner.noCandidates === true &&
+    owner.ageFact?.entryCount !== undefined &&
+    isDeepStrictEqual(
+      owner.ageFact.maintenance,
+      owner.maintenanceConfig
+        ? normalizeResolvedMaintenanceConfigInput(owner.maintenanceConfig)
+        : resolveMaintenanceConfig(),
+    );
+  const installAgeFact = (fact: SessionEntryMaintenanceAgeFact | undefined) => {
+    owner.ageFact = fact;
+    for (const change of owner.ageChanges.values()) {
+      owner.ageFact = updateSessionEntryMaintenanceAgeFact(owner.ageFact, change);
+    }
+  };
   if (!isCurrent()) {
     retireMaintenanceOwner(databasePath, owner);
     return;
@@ -516,8 +536,16 @@ async function runPendingMaintenance(
             throw error;
           }
         },
-        consumeReadOnlyMaintenancePlan() {
+        consumeReadOnlyMaintenancePlan(read, assertConsumptionCurrent) {
+          assertConsumptionCurrent();
           pending.acknowledge();
+          installAgeFact(read.ageFact);
+          // Settle the exhaustive proof while its reader still has writer FIFO custody.
+          owner.noCandidates = read.value.durableNoCandidates === true;
+          if (!hasCurrentNoCandidates()) {
+            owner.noCandidates = false;
+          }
+          assertConsumptionCurrent();
         },
         refreshMaintenanceProtection: () => {
           // Preparation can yield to foreground writes; commit checks only affected protection.
@@ -553,13 +581,9 @@ async function runPendingMaintenance(
       throw new Error("SQLite automatic maintenance returned another operation's result");
     }
     const plan = result.value;
-    const installAgeFact = (fact: SessionEntryMaintenanceAgeFact | undefined) => {
-      owner.ageFact = fact;
-      for (const change of owner.ageChanges.values()) {
-        owner.ageFact = updateSessionEntryMaintenanceAgeFact(owner.ageFact, change);
-      }
-    };
-    installAgeFact(result.ageFact);
+    if (!result.readOnlyInput) {
+      installAgeFact(result.ageFact);
+    }
     const readAge = async () => {
       assertInputsCurrent();
       const pending = capturePendingAgeChanges(owner);
@@ -592,9 +616,11 @@ async function runPendingMaintenance(
     };
     const noChanges = plan.archived === 0 && plan.entryRemovals.length === 0;
     const noFinalization = noChanges && plan.stateDeletePlans.length === 0;
-    // Runtime protection can end without an entry change; only durable protection backs off.
-    owner.noCandidates =
-      noFinalization && plan.durableNoCandidates === true && owner.generation === generation;
+    if (!result.readOnlyInput) {
+      // Native maintenance has no synchronous reader consumer; keep its conservative gate.
+      owner.noCandidates =
+        noFinalization && plan.durableNoCandidates === true && owner.generation === generation;
+    }
     const verifiedNextAt = noChanges ? result.nextAt : undefined;
     if (!noFinalization) {
       await finalizeSessionEntryMaintenancePlansAfterWriterReleaseBestEffort(owner.scope, [plan], {
@@ -608,7 +634,7 @@ async function runPendingMaintenance(
       assertInputsCurrent();
       // Reuse only this pass's consumed decision; newer kicks and changes win after settlement.
       nextMaintenanceAt = noFinalization ? verifiedNextAt : await readAge();
-      if (owner.ageChanges.size > 0) {
+      if (owner.ageChanges.size > 0 && !hasCurrentNoCandidates()) {
         planningChanged = true;
         throw new SqliteReclamationInputsChangedError(
           "SQLite automatic maintenance activity changed during age publication",
@@ -617,6 +643,7 @@ async function runPendingMaintenance(
     }
     owner.rejections = 0;
   } catch (error) {
+    owner.noCandidates = false;
     preservation?.dispose();
     if (planningChanged && isCurrent()) {
       if (finalized && owner.generation !== generation) {
@@ -655,6 +682,12 @@ async function runPendingMaintenance(
   // Writes during finalization also coalesce behind the next quiet window.
   if (!isCurrent()) {
     retireMaintenanceOwner(databasePath, owner);
+    return;
+  }
+  const fact = owner.ageFact;
+  if (fact && hasCurrentNoCandidates()) {
+    owner.activeSessionKeys.clear();
+    scheduleMaintenanceAt(databasePath, owner, Math.min(fact.next.at, fact.recheckAt));
     return;
   }
   if (owner.generation === generation && owner.ageChanges.size === 0) {
