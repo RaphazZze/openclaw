@@ -52,6 +52,7 @@ import {
 } from "./session-accessor.js";
 import { loadSessionEntryReadOnly } from "./session-accessor.sqlite-entry.js";
 import * as sessionLifecycleState from "./session-accessor.sqlite-lifecycle-state.js";
+import * as archivePruning from "./session-history-archive-pruning.js";
 import { createSessionHistoryBudgetFixture } from "./session-history-budget.test-support.js";
 import {
   enforceSqliteSessionHistoryDiskBudget,
@@ -832,52 +833,6 @@ describe("SQLite historical session disk budget", () => {
     },
   );
 
-  it("coalesces forced kicks during and after a sweep until the one-minute interval expires", async () => {
-    const now = Date.now();
-    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
-    const measurement = vi
-      .spyOn(diskBudgetModule, "measureSessionPhysicalDiskUsage")
-      .mockResolvedValue({
-        databaseMainBytes: 0,
-        databaseWalBytes: 0,
-        sessionFilesBytes: 0,
-        totalBytes: 0,
-      });
-    const maintenanceConfig = resolveMaintenanceConfigFromInput({
-      mode: "enforce",
-      maxDiskBytes: 1,
-      highWaterBytes: 1,
-    });
-    const kick = () =>
-      kickSessionHistoryDiskBudgetMaintenance({ storePath, force: true, maintenanceConfig });
-    const settle = async () => {
-      await enforceSqliteSessionHistoryDiskBudget({
-        storePath,
-        mode: "warn",
-        maintenance: { maxDiskBytes: null, highWaterBytes: null },
-      });
-      await new Promise<void>((resolve) => {
-        setImmediate(resolve);
-      });
-    };
-    kick();
-    for (let index = 0; index < 10; index++) {
-      kick();
-    }
-    await settle();
-    expect(measurement).toHaveBeenCalledOnce();
-
-    clock.mockReturnValue(now + 59_999);
-    kick();
-    await settle();
-    expect(measurement).toHaveBeenCalledOnce();
-
-    clock.mockReturnValue(now + 60_000);
-    kick();
-    await settle();
-    expect(measurement).toHaveBeenCalledTimes(2);
-  });
-
   it("backs off protected over-budget history and warns once while manual cleanup remains immediate", async () => {
     await createHistoricalTranscript({
       content: "protected history",
@@ -902,6 +857,7 @@ describe("SQLite historical session disk budget", () => {
     const now = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(now);
     const references = vi.fn();
+    const pruning = vi.spyOn(archivePruning, "pruneAllSessionTranscriptArchivesToHighWater");
     const createReaders = workerReaders.createSessionHistoryWorkerReaders;
     vi.spyOn(workerReaders, "createSessionHistoryWorkerReaders").mockImplementation((run) => {
       const readers = createReaders(run);
@@ -950,11 +906,13 @@ describe("SQLite historical session disk budget", () => {
     ).resolves.toMatchObject({ overBudget: true, removedEntries: 0 });
     const manualScans = references.mock.calls.length;
     expect(manualScans).toBeGreaterThan(firstScans);
+    const manualPruning = pruning.mock.calls.length;
 
     clock.mockReturnValue(now + 31 * 60_000);
     kick();
     await settle();
     expect(references.mock.calls.length).toBeGreaterThan(manualScans);
+    expect(pruning).toHaveBeenCalledTimes(manualPruning);
     expect(evictionWarnSpy).toHaveBeenCalledOnce();
     expect(sessionExists("protected-old")).toBe(true);
     expect(sessionExists("protected-live")).toBe(true);

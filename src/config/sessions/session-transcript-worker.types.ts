@@ -86,7 +86,7 @@ import type {
   SessionRuntimeTargetWorkerResult,
 } from "./session-entry-read.types.js";
 import type * as HarnessCompletionSourceWorker from "./session-harness-completion-source.types.js";
-import type { PublishedSessionTranscriptArchive } from "./session-history-archive-pruning.types.js";
+import type { SessionArchivePruningSnapshot } from "./session-history-archive-pruning.types.js";
 import type { SessionContextMessagesWorkerInput } from "./session-history-read.types.js";
 import type {
   ChatHistoryDisplayRequest,
@@ -433,7 +433,7 @@ export type SessionTranscriptWorkerValues = SessionTranscriptInventoryWorkerValu
     );
     "session-archive-pruning": {
       kind: "session-archive-pruning";
-      result: PublishedSessionTranscriptArchive[];
+      result: SessionArchivePruningSnapshot;
     };
     "transcript-search": { kind: "transcript-search"; result: SessionTranscriptSearchResult };
     "transcript-match": {

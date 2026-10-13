@@ -169,6 +169,58 @@ function countPlanningPasses() {
   ).size;
 }
 
+it.each(["unlock", "insert", "policy"] as const)(
+  "backs off a protected over-cap store on activity and resumes after %s",
+  async (change) => {
+    const { request, scope, storePath, updatedAt } = createStore(60_000);
+    request.maintenanceConfig.maxEntries = 2;
+    const protectedKey = "agent:main:protected-cap";
+    runOpenClawAgentWriteTransaction((owner) => {
+      for (const key of [protectedKey, "agent:main:protected-other"]) {
+        writeSessionEntry(owner, key, {
+          sessionId: key,
+          updatedAt,
+          modelSelectionLocked: true,
+        });
+      }
+    }, scope);
+    kickSessionEntryMaintenanceAfterWrite(request);
+    await yieldToEventLoop();
+    const passes = countPlanningPasses();
+    expect(passes).toBeGreaterThan(0);
+    for (let index = 0; index < 4; index++) {
+      runOpenClawAgentWriteTransaction((owner) => {
+        writeSessionEntry(owner, sessionKey, {
+          sessionId: "age-kick",
+          updatedAt,
+          label: `activity-${index}`,
+        });
+      }, scope);
+      kickSessionEntryMaintenanceAfterWrite(request);
+      await yieldToEventLoop();
+      await vi.advanceTimersByTimeAsync(1_001);
+    }
+    expect(countPlanningPasses()).toBe(passes);
+    let victimKey = protectedKey;
+    if (change === "policy") {
+      request.maintenanceConfig.pruneAfterMs = 1_000;
+    } else {
+      victimKey = change === "insert" ? "agent:main:new-eligible" : protectedKey;
+      runOpenClawAgentWriteTransaction((owner) => {
+        writeSessionEntry(owner, victimKey, { sessionId: victimKey, updatedAt });
+      }, scope);
+    }
+    kickSessionEntryMaintenanceAfterWrite(request);
+    await yieldToEventLoop();
+    expect(countPlanningPasses()).toBeGreaterThan(passes);
+    if (change !== "policy") {
+      expect(loadSessionEntry({ sessionKey: victimKey, storePath })?.archiveReason).toBe(
+        "active-session-cap",
+      );
+    }
+  },
+);
+
 it.each(["before immediate"] as const)(
   "stops automatic maintenance when Gateway drain starts %s",
   async () => {

@@ -373,6 +373,10 @@ only retention and protection metadata before entering the foreground write queu
 cap selection retains only the required oldest eligible entries. The writer rechecks the selected rows and their protection before applying
 changes, so concurrent updates are reconsidered instead of overwritten. Activity
 on unrelated sessions and protection that has ended do not invalidate the plan.
+When an over-cap pass finds only protected entries, ordinary activity does not
+repeat that futile plan. New eligible entries, restored identities, lost entry
+protection, and changed policy reconsider it; age deadlines and the periodic
+recheck still cover protection held by runtime providers.
 If writes invalidate an automatic maintenance plan, its replacement waits for
 a quiet window after the last write (one second, then two seconds). Three
 consecutive invalidations pause automatic retries and log the cause; a new
@@ -435,6 +439,10 @@ Delete and reset operations can request a check sooner, but repeated requests
 coalesce to at most one forced check per minute per store. If cleanup exhausts
 eligible history and the store remains over budget, automatic checks back off
 for 30 minutes and log one warning until the pressure clears or the budget changes.
+The legacy store locator and canonical SQLite path share this queue and backoff.
+After a pass reclaims nothing, the next automatic check first inspects eligible
+data without reserving the foreground writer; protected-only pressure does not
+repeat archive pruning or checkpoints. Manual cleanup still runs immediately.
 The warning recommends raising `session.maintenance.maxDiskBytes` or exporting
 and deleting unneeded sessions. Checks resume on subsequent activity;
 `openclaw sessions cleanup --enforce` remains available immediately.
@@ -444,6 +452,11 @@ prevent truncation, a complete PASSIVE checkpoint is sufficient: frames relevant
 to cleanup must have reached the main database, even if the WAL file remains allocated.
 Retained WAL bytes still count toward the physical budget. Successful cleanup
 logs one outcome with the before/after bytes and removal counts.
+Archive pruning measures physical usage outside the foreground writer queue.
+Each deletion and page-reclamation unit retains its own admission, with a yield
+between reclamation units. Concurrent shrinkage can prune one additional oldest
+derived archive before the next measurement ends the sweep; canonical retention
+and deletion eligibility checks are unchanged.
 
 An incomplete SQLite WAL checkpoint is a separate deferral. Cleanup preserves
 archives and history instead of deleting more data behind the blocked checkpoint.
