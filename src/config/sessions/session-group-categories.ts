@@ -9,7 +9,7 @@ import {
 } from "./session-actor-storage-binding.js";
 import type { SessionCollaborationScope } from "./session-collaboration-scope.js";
 import {
-  publishSessionCollaborationChange,
+  publishSessionCollaborationChanges,
   runSessionCollaborationWrite,
 } from "./session-sharing-store.async.js";
 
@@ -108,9 +108,7 @@ export function updateSessionGroupCategoriesInWorker(params: {
         sessionKey,
         facts: { kind: "category" as const, sessionId, category: to?.trim() || null },
       }));
-      for (const change of changes) {
-        publishSessionCollaborationChange(change, database);
-      }
+      publishSessionCollaborationChanges(changes, database);
       return changed.length;
     },
     assertCurrent,
