@@ -1747,8 +1747,11 @@ schema, agent owner, and physical file identity before reuse. Every request keep
 its own snapshot and current admission checks. Switching databases reuses their
 connections; admitting another retained connection evicts the least recently used
 one. Missing databases consume no retained slot. The parent keeps custody of all
-retained targets and retires the worker after 30 minutes without pending history reads; database cleanup revokes admission and joins native worker
-exit before closing the database. Cold restoration carries the request's same
+retained targets. History and search lanes retire surplus workers after 30 seconds
+idle while preserving logical reader leases; subsequent reads reopen connections
+on demand. The last worker retires after five minutes without pending reads or
+retained leases. Database cleanup revokes admission and joins native worker exit
+before closing the database. Cold restoration carries the request's same
 authority through queue waits and its native commit, so a revoked read cannot
 restore rows after database cleanup. These lifetimes change no schema or
 migration requirement.
