@@ -34,7 +34,7 @@ setupRunAttemptTestHooks();
 
 describe("runCodexAppServerAttempt question refresh", () => {
   beforeEach(() => {
-    // Keep cold fixture setup from expiring the turn before its question can be published.
+    // Keep both deadline clocks paused during cold asynchronous fixture setup.
     vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
   });
 
