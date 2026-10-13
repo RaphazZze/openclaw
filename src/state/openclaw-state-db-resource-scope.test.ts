@@ -182,8 +182,7 @@ it("reopens a failed cleanup without reviving its frame during the next attempt"
   fail = false;
   const retry = scope.close();
   try {
-    expect(isSqliteWorkerMaintenanceAuthorityCurrent(cleanupFrames[0])).toBe(false);
-    expect(isSqliteWorkerMaintenanceAuthorityCurrent(cleanupFrames[1])).toBe(true);
+    expect(cleanupFrames.map(isSqliteWorkerMaintenanceAuthorityCurrent)).toEqual([false, true]);
   } finally {
     retryDone.resolve();
     await retry;
