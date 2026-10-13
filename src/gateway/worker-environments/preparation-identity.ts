@@ -1,100 +1,21 @@
 import { createHash } from "node:crypto";
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { stableStringify } from "@openclaw/normalization-core/stable-stringify";
-import { z } from "zod";
 import { NODE_WORKER_WORKSPACE_PREPARE_COMMAND } from "../../infra/node-commands.js";
 import type { WorkerProfile } from "../../plugins/types.js";
 import { EnvironmentRecipeSchema, type EnvironmentRecipe } from "./environment-recipe.js";
+import {
+  WorkerPreparationArtifactsSchema,
+  WorkerPreparationTargetSchema,
+  type WorkerPreparationArtifacts,
+  type WorkerProjectPreparationIdentity,
+} from "./preparation-identity.schema.js";
 import type { WorkerProjectSnapshot } from "./workspace-git-base.js";
 
-const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
-const Artifacts = z
-  .object({
-    nodeBootstrapSha256: Digest,
-    enabledPluginIds: z.array(z.string().min(1).max(256)).max(256),
-    workerBundleHash: Digest,
-    workerArchiveSha256: Digest,
-    openclawVersion: z.string().min(1).max(128),
-    protocolFeatures: z.array(z.string().min(1).max(128)).max(64),
-  })
-  .strict();
-const Target = z
-  .object({
-    machineClass: z.string().min(1).max(256),
-    platform: z.string().min(1).max(64),
-    arch: z.string().min(1).max(64).optional(),
-    profileKey: Digest.optional(),
-  })
-  .strict();
-const Preparation = z
-  .object({
-    key: Digest,
-    cacheKey: Digest,
-    // Persisted v1 allocations remain readable for replay and cleanup.
-    contractVersion: z.union([z.literal(1), z.literal(2)]),
-    setupRecipe: z
-      .string()
-      .regex(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u)
-      .optional(),
-    runSetupScript: z.boolean().optional(),
-    recipe: EnvironmentRecipeSchema.optional(),
-    target: Target,
-    artifacts: Artifacts,
-  })
-  .strict();
-
-const EmptyPreparation = Preparation.omit({
-  setupRecipe: true,
-  runSetupScript: true,
-  recipe: true,
-}).extend({
-  source: z.literal("empty"),
-});
-
-export type WorkerPreparationArtifacts = z.infer<typeof Artifacts>;
-export type WorkerProjectPreparationIdentity = z.infer<typeof Preparation>;
 export type WorkerProviderPreparedIntent = {
   providerId: string;
   profileSnapshot: WorkerProfile;
   preparationKey?: string;
 };
-
-/** Immutable artifact facts are separate from the reserve's demand/expiry/consumption tuple. */
-export function readWorkerProjectPreparation(
-  project: unknown,
-): WorkerProjectPreparationIdentity | undefined {
-  if (!isRecord(project) || project.preparation === undefined) {
-    return undefined;
-  }
-  const parsed = Preparation.safeParse(project.preparation);
-  if (!parsed.success) {
-    throw new Error("Worker project preparation identity is invalid");
-  }
-  return parsed.data;
-}
-
-export function readWorkerPreparation(
-  profile: Readonly<Record<string, unknown>>,
-): WorkerProjectPreparationIdentity | undefined {
-  if (profile.runtimePreparation === undefined) {
-    return readWorkerProjectPreparation(profile.project);
-  }
-  const parsed = EmptyPreparation.safeParse(profile.runtimePreparation);
-  if (!parsed.success || profile.project !== undefined) {
-    throw new Error("Worker runtime preparation identity is invalid");
-  }
-  return parsed.data;
-}
-
-export function workerPreparationSourceKey(profile: Readonly<Record<string, unknown>>) {
-  if (profile.runtimePreparation !== undefined) {
-    readWorkerPreparation(profile);
-    // Capacity spans runtime generations; the preparation key separately fences
-    // claims by namespace, settings, execution mode, and exact artifacts.
-    return "empty";
-  }
-  return isRecord(profile.project) ? Digest.parse(profile.project.key) : undefined;
-}
 
 export function createWorkerPreparationIdentity(params: {
   namespace: string;
@@ -108,7 +29,7 @@ export function createWorkerPreparationIdentity(params: {
   runSetupScript?: boolean;
   recipe?: EnvironmentRecipe;
 }): WorkerProjectPreparationIdentity {
-  const artifacts = Artifacts.parse(params.artifacts);
+  const artifacts = WorkerPreparationArtifactsSchema.parse(params.artifacts);
   artifacts.enabledPluginIds = [...new Set(artifacts.enabledPluginIds)].toSorted();
   artifacts.protocolFeatures = [...new Set(artifacts.protocolFeatures)].toSorted();
   // Skipping an executable recipe owns a separate cache; absent recipes do no setup.
@@ -119,7 +40,7 @@ export function createWorkerPreparationIdentity(params: {
     ...(params.setupRecipe && params.runSetupScript === false
       ? { runSetupScript: false as const }
       : {}),
-    target: Target.parse(params.target),
+    target: WorkerPreparationTargetSchema.parse(params.target),
     artifacts,
   };
   // Source root is transport location only: linked worktrees share Git identity.

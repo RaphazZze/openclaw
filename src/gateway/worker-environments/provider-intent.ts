@@ -12,10 +12,12 @@ import type { WorkerExecutionMode, WorkerProfile, WorkerProvider } from "../../p
 import { workerEnvironmentServiceError as serviceError } from "./environment-errors.js";
 import {
   createWorkerPreparationIdentity,
-  readWorkerPreparation,
-  readWorkerProjectPreparation,
   type WorkerProviderPreparedIntent,
 } from "./preparation-identity.js";
+import {
+  readWorkerPreparation,
+  readWorkerProjectPreparation,
+} from "./preparation-identity.schema.js";
 import {
   readWorkerProjectEnvironmentRecipe,
   readWorkerProjectSnapshot,

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { createWorkerPreparationIdentity } from "./preparation-identity.js";
 import {
-  createWorkerPreparationIdentity,
   readWorkerPreparation,
   readWorkerProjectPreparation,
-} from "./preparation-identity.js";
+} from "./preparation-identity.schema.js";
 import type { WorkerLocalProjectSnapshot } from "./workspace-git-base.js";
 
 const input: Omit<Parameters<typeof createWorkerPreparationIdentity>[0], "project"> & {

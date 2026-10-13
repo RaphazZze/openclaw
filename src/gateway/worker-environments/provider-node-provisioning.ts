@@ -10,7 +10,10 @@ import type {
 import type { WorkerInstallationArtifact } from "./bundle.js";
 import type { WorkerCredentialBroker } from "./credential-broker.js";
 import { workerEnvironmentServiceError as serviceError } from "./environment-errors.js";
-import { readWorkerPreparation, readWorkerProjectPreparation } from "./preparation-identity.js";
+import {
+  readWorkerPreparation,
+  readWorkerProjectPreparation,
+} from "./preparation-identity.schema.js";
 import type { createWorkerProjectPreparation } from "./project-preparation.js";
 import type { WorkerProviderLifecycleOptions } from "./provider-lifecycle.types.js";
 import type { createWorkerProviderOwnerLifecycle } from "./provider-owner-lifecycle.js";

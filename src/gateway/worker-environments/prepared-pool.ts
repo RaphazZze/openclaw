@@ -1,5 +1,5 @@
-import { readWorkerPreparation } from "./preparation-identity.js";
 import type { WorkerProviderPreparedIntent } from "./preparation-identity.js";
+import { readWorkerPreparation } from "./preparation-identity.schema.js";
 import * as pool from "./prepared-pool-admission.js";
 import { runPreparedPoolPass } from "./prepared-pool-pass.js";
 import {

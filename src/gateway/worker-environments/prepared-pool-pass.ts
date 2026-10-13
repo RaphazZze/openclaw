@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { runTasksWithConcurrency } from "../../utils/run-with-concurrency.js";
-import { readWorkerPreparation, workerPreparationSourceKey } from "./preparation-identity.js";
+import {
+  readWorkerPreparation,
+  workerPreparationSourceKey,
+} from "./preparation-identity.schema.js";
 import type { Generations, PassContext, PoolOptions } from "./prepared-pool-admission.js";
 import * as pool from "./prepared-pool-admission.js";
 import { isSupersededPresenceReserve } from "./prepared-pool-presence.js";

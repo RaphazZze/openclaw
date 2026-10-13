@@ -1,7 +1,10 @@
 import { normalizeCapabilityProviderId } from "../../plugins/provider-registry-shared.js";
 import type { WorkerProvider } from "../../plugins/types.js";
-import { readWorkerPreparation, workerPreparationSourceKey } from "./preparation-identity.js";
 import type { WorkerProviderPreparedIntent } from "./preparation-identity.js";
+import {
+  readWorkerPreparation,
+  workerPreparationSourceKey,
+} from "./preparation-identity.schema.js";
 import {
   type createPreparedPoolPresence,
   isSupersededPresenceReserve,

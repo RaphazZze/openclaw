@@ -19,7 +19,7 @@ import type {
 } from "./environment-record.js";
 import type { WorkerSessionPlacementRecord } from "./placement-record.js";
 import { find as findPlacement } from "./placement-row-codec.js";
-import { workerPreparationSourceKey } from "./preparation-identity.js";
+import { workerPreparationSourceKey } from "./preparation-identity.schema.js";
 import { parseWorkerEnvironmentState } from "./state.js";
 import type { WorkerEnvironmentNativePatch } from "./store-projection.js";
 import { executeWorkerEnvironmentWrite } from "./store-write.js";
