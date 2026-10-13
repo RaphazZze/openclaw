@@ -254,6 +254,9 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         });
         if (signal?.aborted) {
           onAbort();
+        } else if (failure) {
+          // An approval can fail before sendUserTurn resolves; interrupt now that the turn exists.
+          void stop().catch(() => runtime.close());
         }
         setActiveEmbeddedRun(params.sessionId, handle, params.sessionKey, params.sessionFile);
         params.replyOperation?.attachBackend(handle);

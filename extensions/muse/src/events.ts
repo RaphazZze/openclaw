@@ -4,6 +4,7 @@ import {
   type AgentHarnessAttemptParamsV2,
   type AgentMessage,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 export type MuseAssistant = Extract<AgentMessage, { role: "assistant" }>;
 
@@ -57,8 +58,7 @@ export async function consumeTurn(
           messageStarted = true;
           await params.onAssistantMessageStart?.();
         }
-        visibleText += delta;
-        await params.onAgentEvent?.({ stream: "assistant", data: { delta, text: visibleText } });
+        await params.onAgentEvent?.({ stream: "assistant", data: { delta, text: value } });
       } else if (item.kind === "reasoning" && (field === "text" || field.startsWith("summary."))) {
         await params.onReasoningStream?.({ text: delta });
       }
@@ -109,10 +109,7 @@ export async function consumeTurn(
         if (item.args) {
           try {
             const decoded: unknown = JSON.parse(item.args);
-            args =
-              decoded && typeof decoded === "object" && !Array.isArray(decoded)
-                ? (decoded as Record<string, unknown>)
-                : { rawArgs: item.args };
+            args = isRecord(decoded) ? decoded : { rawArgs: item.args };
           } catch {
             args = { rawArgs: item.args };
           }
@@ -153,6 +150,8 @@ export async function consumeTurn(
         });
       } else if (item.kind === "agentMessage") {
         await emitField(item, "text", item.text ?? "");
+        // The completed item is authoritative; streamed deltas only drive live UI.
+        visibleText += item.text ?? "";
         messages.push(assistantMessage(params, [{ type: "text", text: item.text ?? "" }]));
       } else if (item.kind === "reasoning") {
         if (item.summary) {
