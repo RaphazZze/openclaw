@@ -103,7 +103,6 @@ export type {
   SessionTranscriptVisibleMessageEventRow,
   SessionTranscriptWriteLockAccessorContext,
   SessionTranscriptWriteScope,
-  SessionTranscriptWriteTransactionContext,
   TranscriptEvent,
   TranscriptMessageAppendOptions,
   TranscriptMessageAppendResult,
@@ -258,7 +257,6 @@ export {
   trimSessionTranscriptForManualCompact,
   withTranscriptWriteLock,
   withTranscriptWriteSequence,
-  withTranscriptWriteTransaction,
 } from "./session-accessor.transcript.js";
 export {
   appendTranscriptMessages,

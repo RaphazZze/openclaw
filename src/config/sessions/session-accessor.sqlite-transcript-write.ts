@@ -94,8 +94,6 @@ import {
   withOwnedSessionTranscriptWriterFence,
 } from "./transcript-write-context.js";
 
-export { withTranscriptWriteTransaction } from "./session-accessor.sqlite-transcript-write-snapshot.js";
-
 /** Replaces the active session identity and its prepared branch in one commit. */
 export async function replaceSessionWithBranchedTranscript(
   scope: SessionTranscriptRuntimeTarget,
