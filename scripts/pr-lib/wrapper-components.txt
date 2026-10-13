@@ -2400,3 +2400,8 @@ src/state/user-model-account-id.ts
 src/state/user-profile-authority.ts
 src/state/user-profile-events.ts
 src/utils/normalize-secret-input.ts
+src/gateway/chat-display-projection.helpers.ts
+src/media/inbound-media-uri.ts
+src/media/parse-output.ts
+src/utils/directive-tags.ts
+src/utils/inline-reply-tags.ts
