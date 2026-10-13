@@ -8,8 +8,8 @@ import {
   type McpAppViewLease,
 } from "../agents/mcp-ui-resource.js";
 import { getRuntimeConfig } from "../config/io.js";
+import { captureSessionActorStorageOwner } from "../config/sessions/session-actor-storage-binding.js";
 import { readRetainedSessionEntryFacts } from "../config/sessions/session-entry-read-facts.js";
-import { captureSessionEntryMetadataRead } from "../config/sessions/session-entry-source-authority.js";
 import { hasErrnoCode } from "../infra/errno.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { logDebug } from "../logger.js";
@@ -43,10 +43,11 @@ async function captureHostFileSession(
   getConfig = getRuntimeConfig,
 ) {
   // File handles outlive their opening RPC; each file effect owns its request authority.
-  const metadata = captureSessionEntryMetadataRead(target, () => {});
+  const authority = { assertCurrent() {}, authorize() {} };
+  const memory = captureSessionActorStorageOwner(target, authority);
   const config = getConfig();
   const assertRoutingCurrent = captureSessionMutationRouting(config, undefined, [target]);
-  const loaded = metadata
+  const loaded = memory
     ? undefined
     : await loadGatewaySessionEntryReadOnlyAsync(
         target.sessionKey,
@@ -57,8 +58,8 @@ async function captureHostFileSession(
         config,
       );
   const readEntry = () =>
-    metadata
-      ? metadata.readCurrent()
+    memory
+      ? memory.owner?.readSession(target.sessionKey, authority)?.entry
       : loaded &&
         readRetainedSessionEntryFacts(
           {

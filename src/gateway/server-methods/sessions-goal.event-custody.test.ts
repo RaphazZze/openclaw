@@ -8,8 +8,6 @@ const edge = vi.hoisted(() => ({
   record: vi.fn(),
   emit: vi.fn(),
   current: vi.fn(),
-  prepareTarget: vi.fn(),
-  releaseTarget: vi.fn(),
   fingerprint: vi.fn(),
   forbidden: vi.fn((): never => {
     throw new Error("Pure Goal RPC control crossed a native or process boundary");
@@ -76,10 +74,9 @@ vi.mock("../session-sharing.js", () => ({
     }
   },
 }));
-// mock-isolation: Target preparation uses fixture custody without loading the native sharing owner.
+// mock-isolation: Event delivery does not need routing configuration.
 vi.mock("../session-sharing-preparation.js", () => ({
   captureSessionMutationRouting: () => () => {},
-  prepareSessionMutationFacts: edge.prepareTarget,
 }));
 // mock-isolation: Goal-event fixtures supply revocable authorization without loading sharing storage.
 vi.mock("../session-sharing-authorization-async.js", () => ({
@@ -150,51 +147,6 @@ beforeEach(() => {
 afterEach(() => expect(edge.forbidden).not.toHaveBeenCalled());
 
 describe("Goal RPC event custody", () => {
-  it.each([false, true])(
-    "retains an unbound incognito target through awaited preparation; replaced=%s",
-    async (replaced) => {
-      edge.target.storeKey = "agent:main:dashboard:incognito-goal";
-      edge.target.canonicalKey = edge.target.storeKey;
-      let currentTarget = edge.target;
-      edge.prepareTarget.mockResolvedValue({
-        readCurrent: () => ({ target: currentTarget, membership: new Set<string>() }),
-        release: edge.releaseTarget,
-      });
-      const entered = createDeferred();
-      const fingerprint = createDeferred<string>();
-      edge.fingerprint.mockImplementation(() => {
-        entered.resolve();
-        return fingerprint.promise;
-      });
-      const { pending, respond } = invoke();
-      await entered.promise;
-      expect(edge.releaseTarget).not.toHaveBeenCalled();
-      if (replaced) {
-        currentTarget = {
-          ...edge.target,
-          entry: { ...edge.target.entry, sessionId: "successor" },
-        };
-      }
-      fingerprint.resolve("fingerprint");
-      await pending;
-      expect(edge.releaseTarget).toHaveBeenCalledOnce();
-      if (replaced) {
-        expect(edge.mutate).not.toHaveBeenCalled();
-        expect(respond).toHaveBeenCalledWith(
-          false,
-          undefined,
-          expect.objectContaining({ code: "INVALID_REQUEST" }),
-        );
-      } else {
-        expect(respond).toHaveBeenCalledWith(
-          true,
-          { operationId: "operation-id", status: "updated" },
-          undefined,
-        );
-      }
-    },
-  );
-
   it.each([false, true])(
     "publishes the committed projection immediately and joins event custody when broadcast fails=%s",
     async (broadcastFails) => {

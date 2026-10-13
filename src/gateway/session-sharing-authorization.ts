@@ -6,6 +6,7 @@ import {
   type ErrorShape,
 } from "../../packages/gateway-protocol/src/index.js";
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
+import { captureMemoryExactSessionReader } from "../config/sessions/session-accessor.memory-exact-read.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { toAgentStoreSessionKey } from "../routing/session-key.js";
@@ -442,11 +443,18 @@ export async function withCurrentSessionSharingSource<T>(params: {
   );
 }
 
-/** Missing rows bind to the configured write target without physical discovery. */
+/** Missing rows bind to their memory namespace or configured durable write target. */
 export function resolveSessionMutationWriteRoute(
   cfg: OpenClawConfig,
   target: SessionMutationTarget,
 ) {
   const identity = resolveSessionStoreIdentity({ cfg, ...target });
-  return { ...identity, storePath: resolveSessionStorePathCore(cfg.session?.store, identity) };
+  const memory = captureMemoryExactSessionReader({
+    agentId: identity.agentId,
+    sessionKey: identity.canonicalKey,
+  });
+  return {
+    ...identity,
+    storePath: memory?.path ?? resolveSessionStorePathCore(cfg.session?.store, identity),
+  };
 }

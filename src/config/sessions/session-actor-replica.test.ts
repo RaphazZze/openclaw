@@ -2,6 +2,7 @@ import path from "node:path";
 import "../../test-utils/prepare-compiled-subprocesses.js";
 import { expect, it, vi } from "vitest";
 import { openNodeSqliteDatabase } from "../../infra/node-sqlite.js";
+import { prepareSessionCostUsageRefreshLock } from "../../infra/session-cost-usage-cache.sqlite.js";
 import {
   readSqliteDatabaseScopedWriteTokenForPath,
   sqliteSessionIdWriteScope,
@@ -17,8 +18,6 @@ import {
   openOpenClawAgentDatabase,
   runOpenClawAgentWriteTransaction,
 } from "../../state/openclaw-agent-db.js";
-import { loadUsageCacheOperations } from "../../state/openclaw-agent-execution-operations.js";
-import type { AgentWorkerOperationContext } from "../../state/openclaw-agent-operation-context.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import {
   beginRestartRecoveryTerminalDelivery,
@@ -147,32 +146,27 @@ function hydrate({ replica, load }: Fixture, epoch = "first", sequence = 0) {
 it("keeps actor facts after usage cache writes and pruning", async () => {
   await withReplica(async (fixture) => {
     const { database, scope, replica } = fixture;
-    const operations = await loadUsageCacheOperations();
-    const options = { agentId: scope.agentId, path: database.path, env: scope.env };
-    const context: AgentWorkerOperationContext = {
-      options,
-      open: () => database,
-      admit() {},
-      writeTransaction(operationLabel, _owner, write) {
-        return runOpenClawAgentWriteTransaction(write, options, { operationLabel });
-      },
-    };
-    const snapshot = hydrate(fixture);
-    const valueJson = new TextEncoder().encode("{}");
-    expect(
-      operations["usageCache.writeRollup"](
-        {
+    const usage = prepareSessionCostUsageRefreshLock(scope.agentId, database.path, {
+      env: scope.env,
+    });
+    try {
+      expect(await usage.acquire()).toBe(true);
+      const snapshot = hydrate(fixture);
+      const valueJson = new TextEncoder().encode("{}");
+      expect(
+        await usage.writeRollup({
           rollupId: "usage-rollup",
           valueJson,
           blob: null,
           updatedAt: 1,
-        },
-        context,
-      ),
-    ).toBe(true);
-    expect(replica.read()).toEqual(snapshot);
-    operations["usageCache.prune"]([{ key: "usage-rollup", valueJson, updatedAt: 1 }], context);
-    expect(replica.read()).toEqual(snapshot);
+        }),
+      ).toBe(true);
+      expect(replica.read()).toEqual(snapshot);
+      await usage.pruneRows([{ key: "usage-rollup", valueJson, updatedAt: 1 }]);
+      expect(replica.read()).toEqual(snapshot);
+    } finally {
+      await usage.release();
+    }
   });
 });
 

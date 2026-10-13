@@ -553,7 +553,7 @@ describe("node worker launch wire", () => {
         phase = "load fixture setup";
         const loadSessions: string[] = [];
         for (let index = 0; index < FINALIZATION_LOAD_CONCURRENCY; index += 1) {
-          phase = `load workspace dispatch ${index + 1}/${FINALIZATION_LOAD_CONCURRENCY}`;
+          phase = `load workspace creation ${index + 1}/${FINALIZATION_LOAD_CONCURRENCY}`;
           const sessionKey = `${SESSION_KEY}-load-${index}`;
           await operator.request("sessions.create", {
             key: sessionKey,
@@ -563,13 +563,21 @@ describe("node worker launch wire", () => {
             worktreeBaseRef: "main",
             cwd: published.source,
           });
-          await gateway.call(
-            "sessions.dispatch",
-            { key: sessionKey, deviceId: workerNode.identity.deviceId },
-            { timeoutMs: PROOF_TIMEOUT_MS },
-          );
           loadSessions.push(sessionKey);
         }
+        phase = "load workspace dispatch";
+        const loadGateway = gateway;
+        const loadDeviceId = workerNode.identity.deviceId;
+        // Worktree creation shares Git state; independent remote transfers can overlap.
+        await Promise.all(
+          loadSessions.map((key) =>
+            loadGateway.call(
+              "sessions.dispatch",
+              { key, deviceId: loadDeviceId },
+              { timeoutMs: PROOF_TIMEOUT_MS },
+            ),
+          ),
+        );
         observeFinalizationLoad = true;
         const readyzSamples: Array<{ atMs: number; latencyMs: number; status: number }> = [];
         const samplerAbort = new AbortController();
