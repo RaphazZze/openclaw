@@ -1,6 +1,7 @@
 import { isNativeError, isProxy } from "node:util/types";
 import type { MessagePort } from "node:worker_threads";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
+import type { SqliteWorkerMaintenanceAuthority } from "../state/openclaw-state-maintenance-authority.js";
 import type { OpenClawStateWorkerErrorPayload } from "../state/openclaw-state-worker-error.js";
 import type { DiagnosticWorkerRequestFields } from "./diagnostic-process-types.js";
 import type { SqliteDatabaseAdmissions } from "./sqlite-database-admission.js";
@@ -26,11 +27,7 @@ export type SqliteWorkerExecutionAuthority = {
   birthtime?: string;
 };
 
-export type SqliteWorkerMaintenanceAuthority = {
-  scope: Int32Array<SharedArrayBuffer>;
-  owners: readonly Int32Array<SharedArrayBuffer>[];
-  frame?: Int32Array<SharedArrayBuffer>;
-};
+export type { SqliteWorkerMaintenanceAuthority } from "../state/openclaw-state-maintenance-authority.js";
 
 export type SqliteWorkerAdmissionRequest = {
   stage: "open" | "prepare" | "transaction" | "commit";

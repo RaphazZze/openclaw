@@ -1,4 +1,8 @@
-import type { SqliteWorkerMaintenanceAuthority } from "../infra/sqlite-worker-contract.js";
+export type SqliteWorkerMaintenanceAuthority = {
+  scope: Int32Array<SharedArrayBuffer>;
+  owners: readonly Int32Array<SharedArrayBuffer>[];
+  frame?: Int32Array<SharedArrayBuffer>;
+};
 
 const OPEN = 0;
 const DRAINING = 1;

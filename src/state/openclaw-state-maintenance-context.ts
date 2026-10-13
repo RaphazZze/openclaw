@@ -1,11 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import { resolveIdentityPathViaExistingAncestorSync } from "../infra/boundary-path.js";
-import type { SqliteWorkerMaintenanceAuthority } from "../infra/sqlite-worker-contract.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import {
   MaintenanceContinuationLifetime,
   MaintenanceScopeLifetime,
+  type SqliteWorkerMaintenanceAuthority,
 } from "./openclaw-state-maintenance-authority.js";
 
 export type MaintenanceResource = {
