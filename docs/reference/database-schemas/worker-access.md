@@ -378,6 +378,12 @@ rollback retains the previous facts. Cold, evicted, or invalidated actors use th
 canonical participant read. Participant updates remain independent of metadata CAS.
 This changes no schema, retention, stored format, or update behavior.
 
+Collaboration writes reuse the captured agent executor without opening a Gateway
+SQLite handle. Their commit receipts install membership, owner, category, and
+participant facts through the same retained-fact owner as native writers, then
+release pending publication before notifying row and lifecycle observers. Live
+sharing authority is still checked by the worker's transaction and commit admission.
+
 ## Session and ancillary worker operations
 
 Bounded transcript hydration retains its result in the existing session actor
