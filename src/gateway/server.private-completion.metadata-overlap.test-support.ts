@@ -71,9 +71,9 @@ export function holdMetadataThroughSubagentStop(target: {
   });
   restores.push(() => queueSpy.mockRestore());
 
-  const captureExecution = executionOwner.captureOpenClawAgentDatabasePreparationExecution;
+  const captureExecution = executionOwner.captureOpenClawAgentDatabaseExecution;
   const executionSpy = vi
-    .spyOn(executionOwner, "captureOpenClawAgentDatabasePreparationExecution")
+    .spyOn(executionOwner, "captureOpenClawAgentDatabaseExecution")
     .mockImplementation((...args) => {
       const execution = captureExecution(...args);
       if (producerScope.getStore() !== true) {
