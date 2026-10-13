@@ -9,14 +9,14 @@ import {
   type PluginMetadataStateKey,
   type PluginMetadataStateRow,
   type PluginMetadataStateSelector,
-} from "./plugin-metadata-state-row.kernel.js";
+} from "./plugin-metadata-state.kernel.js";
 
 export {
   INSTALLED_PLUGIN_INDEX_STATE_KEY,
   type PluginMetadataStateKey,
   type PluginMetadataStateRow,
   type PluginMetadataStateSelector,
-} from "./plugin-metadata-state-row.kernel.js";
+} from "./plugin-metadata-state.kernel.js";
 
 /** Shared inspection commands use the same existing-only, artifact-preserving reader. */
 export function readPluginMetadataStateRowSync(

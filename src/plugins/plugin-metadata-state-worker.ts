@@ -8,7 +8,7 @@ import type {
   PluginMetadataStateKey,
   PluginMetadataStateRow,
   PluginMetadataStateSelector,
-} from "./plugin-metadata-state-row.kernel.js";
+} from "./plugin-metadata-state.kernel.js";
 
 async function readPluginMetadataState(
   selection:
@@ -18,15 +18,27 @@ async function readPluginMetadataState(
   artifactPreservingReadOnly: boolean,
 ): Promise<PluginMetadataStateRow[]> {
   try {
+    const stateKeys: PluginMetadataStateKey[] =
+      "stateKeys" in selection
+        ? [...selection.stateKeys]
+        : [
+            selection.selector === "installed-index"
+              ? "plugins.installedIndex"
+              : "plugins.bundledDiscovery",
+          ];
     const read = () =>
-      executeExistingOpenClawStateRead(options, {
-        type: "plugins.metadata.read",
-        input: selection,
-      });
+      executeExistingOpenClawStateRead(
+        options,
+        {
+          type: "plugins.metadata.read",
+          input: { stateKeys },
+        },
+        { snapshotPreparation: "awaited" },
+      );
     const result = await (artifactPreservingReadOnly
       ? withArtifactPreservingStateReads(read)
       : read());
-    if (!result) {
+    if (result === undefined) {
       return [];
     }
     return result.rows;

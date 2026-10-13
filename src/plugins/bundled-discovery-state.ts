@@ -1,6 +1,5 @@
 // Bundled-discovery compatibility is machine-owned upgrade state.
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
-import { readConfigMachineStateAsync } from "../state/config-machine-state-async.js";
 import { readConfigMachineState } from "../state/config-machine-state.js";
 import { isStateDatabaseReadAdmissionInvalidatedError } from "../state/openclaw-state-db-async-lifecycle.js";
 import {
@@ -157,11 +156,10 @@ export async function prepareBundledDiscoveryMode(
     // The read worker retains these snapshot bytes; derivation consumes its result locally.
     let value: BundledDiscoveryMode;
     try {
-      value = parseBundledDiscoveryMode(
-        await readConfigMachineStateAsync("plugins.bundledDiscovery", options, {
-          artifactPreservingReadOnly: true,
-        }),
-      );
+      const row = readPreparedRow
+        ? await readPreparedRow(resolveBundledDiscoveryMemoKey(env))
+        : await readPluginMetadataStateRow("bundled-discovery", options);
+      value = parseBundledDiscoveryMode(row ? JSON.parse(row.value_json) : undefined);
     } catch (error) {
       if (isStateDatabaseReadAdmissionInvalidatedError(error)) {
         throw new PluginCacheFactInvalidatedError(

@@ -8,7 +8,7 @@ import {
   readPluginMetadataStateRowsInDatabase,
   type PluginMetadataStateKey,
   type PluginMetadataStateSelector,
-} from "./plugin-metadata-state-row.kernel.js";
+} from "./plugin-metadata-state.kernel.js";
 
 export const pluginMetadataReadOperations = {
   "plugins.metadata.read": (
