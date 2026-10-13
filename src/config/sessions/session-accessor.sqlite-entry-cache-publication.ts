@@ -9,6 +9,7 @@ import { invalidateOpenClawAgentWritableProjections } from "../../state/openclaw
 import { invalidateOpenClawAgentReadOnlyProjections } from "../../state/openclaw-agent-db-readonly-scope.js";
 import {
   publishRetainedSessionEntryChange,
+  markSessionSharingAuthorityUnknown,
   recordCommittedSessionEntryPublication,
   recordCommittedSessionMetadataPublication,
   retainedSharingReads,
@@ -21,7 +22,6 @@ import {
 } from "./session-accessor.sqlite-entry-cache-state.js";
 import {
   createSessionEntryCreationOperation,
-  assertSessionEntryCreationCurrent,
   assertSessionEntryCreationTarget,
   type SessionEntryCreationTarget,
   projectSessionSharingEntry,
@@ -59,7 +59,6 @@ export {
 export type {
   PreparedSessionEntryChanges,
   SessionEntryPublicationSource,
-  SessionEntryReplacementPublication,
 } from "./session-accessor.sqlite-entry-cache.types.js";
 
 export function bindPreparedSessionEntryPublication(
@@ -127,7 +126,11 @@ export function invalidateSessionEntryCaches(databaseIdentity: string): void {
 export function invalidateSessionEntryPublication(
   database: SessionEntryCacheDatabase,
   sessionKey: string,
+  authorityChanged = true,
 ): void {
+  if (authorityChanged) {
+    markSessionSharingAuthorityUnknown(database, sessionKey);
+  }
   publishRetainedSessionEntryChange(database, sessionKey, undefined, undefined, false);
   if (!database.db.location()) {
     commitIncognitoSessionSharingFacts(database.db, sessionKey, null);
@@ -140,10 +143,13 @@ export function publishSessionEntryWorkerMetadataInvalidation(params: {
   storePath: string;
   databaseIdentity: string;
   sessionKey: string;
+  entry?: SessionEntry;
 }): void {
   invalidateSessionEntryCaches(params.databaseIdentity);
   for (const read of retainedSharingReads(params.databaseIdentity, params.sessionKey) ?? []) {
-    publishRetainedSessionEntryPredicate(read, undefined, false);
+    publishRetainedSessionEntryPredicate(read, params.entry, params.entry !== undefined, {
+      preserveMatchingEntry: true,
+    });
   }
   const change: SessionRowChange = {
     agentId: params.agentId,
@@ -213,7 +219,6 @@ export function runWithSessionEntryCreationPublication<T>(
   run: () => Promise<T>,
 ): Promise<T> {
   const creation = preparedSharingChanges.operations.get(operation);
-  assertSessionEntryCreationCurrent(creation);
   return preparedSharingChanges.current.run(creation, run);
 }
 
@@ -309,7 +314,7 @@ export function publishSessionSharingFieldChange(
         sessionKey,
         change.kind === "category" ? undefined : change,
       ),
-    () => invalidateSessionEntryPublication(database, sessionKey),
+    () => invalidateSessionEntryPublication(database, sessionKey, change.kind !== "category"),
   );
 }
 
@@ -346,7 +351,7 @@ export function publishSessionSharingEntryChange(
       () =>
         recordCommittedSessionMetadataPublication(database, update.sessionKey, facts, update.entry),
       undefined,
-      () => invalidateSessionEntryPublication(database, update.sessionKey),
+      () => invalidateSessionEntryPublication(database, update.sessionKey, false),
     );
   }
   const previousIdentity = update.previousEntry && {

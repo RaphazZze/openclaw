@@ -33,16 +33,16 @@ import {
   commitMainSessionRecovery,
   type MainSessionRecoveryStoreTarget,
 } from "./main-session-recovery-store.js";
-import {
-  hasRestartRecoveryMessageActionAuthority,
-  requiresRestartRecoveryMessageActionAuthority,
-  resumeMainSession,
-} from "./main-session-restart-dispatch.js";
+import { resumeMainSession } from "./main-session-restart-dispatch.js";
 import {
   markSessionCompletedAfterRecoveryCheckpoint,
   readMainSessionRecoveryCheckpoint,
   reconcileInvalidHarnessCompletion,
 } from "./main-session-restart-recovery-checkpoint.js";
+import {
+  hasRestartRecoveryMessageActionAuthority,
+  requiresRestartRecoveryMessageActionAuthority,
+} from "./main-session-restart-recovery-delivery.js";
 import {
   skippedMainSessionRecoveryDecision,
   type MainSessionRecoveryDecision,
@@ -235,7 +235,7 @@ export async function recoverStore(params: {
         skip("not_main_session");
         continue;
       }
-      const dispatchTarget = resolveRestartRecoveryDispatchTarget({
+      const dispatchTarget = await resolveRestartRecoveryDispatchTarget({
         agentId: params.expectedTarget?.agentId,
         storeAgentId: params.storeAgentId,
         cfg: params.cfg,
@@ -404,6 +404,7 @@ export async function recoverStore(params: {
           completionSource = createHarnessCompletionSourceAssertion({
             claim: harnessCompletion,
             storePath: params.storePath,
+            mode: "committed",
           });
           return readAdmittedHarnessCompletionInputAsync({
             claim: harnessCompletion,
@@ -508,8 +509,45 @@ export async function recoverStore(params: {
         return result;
       }
       if (
+        !harnessCompletion &&
+        entry.restartRecoverySourceIngress === "internal" &&
+        expectedRecoverySourceRunId?.startsWith("announce:requester-settle:")
+      ) {
+        try {
+          const { prepareRequesterSettleWakeRecoverySource } =
+            await import("../subagents/registry/subagent-registry.js");
+          completionSource = await prepareRequesterSettleWakeRecoverySource({
+            runId: expectedRecoverySourceRunId,
+            requesterSessionKey: dispatchSessionKey,
+            requesterAgentId: agentId,
+            sessionId: entry.sessionId,
+            lifecycleRevision: entry.lifecycleRevision,
+            storePath: params.storePath,
+            gatewayRuntime: params.gatewayRuntime,
+          });
+          if (!completionSource || !entry.restartRecoveryOperatorSource) {
+            throw new Error(
+              "Requester settle recovery lacks its original cohort or operator authority",
+            );
+          }
+          completionSource();
+        } catch (error) {
+          mainSessionRecoveryLog.warn(
+            `requester settle recovery source unavailable for ${sessionKey}: ${String(error)}`,
+          );
+          result.failed++;
+          continue;
+        }
+      }
+      // Steering changes the transcript tail, not the executing turn's source claim.
+      const hasRetainedHumanSource =
+        expectedRecoverySourceRunId !== undefined &&
+        (entry.restartRecoverySourceIngress === "control-ui" ||
+          entry.restartRecoverySourceIngress === "channel");
+      if (
         !recoverableHarnessCompletion &&
-        (source === "inter_session" ||
+        !completionSource &&
+        ((source === "inter_session" && !hasRetainedHumanSource) ||
           ((source === undefined ||
             source === "internal_system" ||
             source === "harness_completion") &&

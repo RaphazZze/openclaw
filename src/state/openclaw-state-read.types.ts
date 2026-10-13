@@ -254,6 +254,8 @@ export type OpenClawStateReadCommand =
   | { type: "worktrees.list" }
   | { type: "workerPlacements.changeSnapshot"; profileIds?: string[] }
   | { type: "nodeHost.config" }
+  | { type: "cron.store" }
+  | { type: "hooks.internal.installs" }
   | { type: "tts.prefsPath" }
   | { type: "voicewake.triggers" }
   | { type: "voicewake.routing" }
@@ -510,6 +512,8 @@ export type OpenClawStateReadOptions = {
   live?: true;
   /** Named committed-status readers may reopen the matching retained warm source. */
   preferIndependentWarmRead?: true;
+  /** Promise-only callers can retain their snapshot child without synchronous servicing. */
+  snapshotPreparation?: "awaited";
   mapError?: (error: unknown, phase: OpenClawStateReadPhase) => unknown;
 } & (
   | {
