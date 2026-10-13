@@ -26,7 +26,7 @@ import { ensureProfileForEmail } from "../state/user-profiles.js";
 import { createOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { acquireTestPortBlock } from "../test-utils/port-claims.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
-import * as sessionStoreLookup from "./session-utils-store-lookup.js";
+import * as sessionAuthorization from "./session-sharing-authorization-async.js";
 import {
   connectGatewayClient,
   disconnectGatewayClient,
@@ -37,20 +37,24 @@ import { buildMockOpenAiResponsesProvider } from "./test-openai-responses-model.
 function holdSessionAuthorizationRead(sessionKey: string) {
   const readCaptured = createDeferredCore();
   const resumeRead = createDeferredCore();
-  const read = sessionStoreLookup.withGatewaySessionStoreTarget;
+  const read = sessionAuthorization.resolveSessionMutationAuthorizationAsync;
   let held = false;
-  const readWithHold: typeof read = async (params, consume) => {
-    const reply = await read(params, consume);
-    if (!held && params.key === sessionKey && params.includeMembership === true) {
+  const readWithHold: typeof read = async (request) => {
+    const reply = await read(request);
+    if (
+      !held &&
+      request.method === "chat.send" &&
+      request.requestParams.sessionKey === sessionKey
+    ) {
       held = true;
       readCaptured.resolve();
-      // The ordered read releases its writer FIFO before the test commits a revocation.
+      // Prepared authority retains live facts without holding the writer FIFO.
       await resumeRead.promise;
     }
     return reply;
   };
   const authorizationRead = vi
-    .spyOn(sessionStoreLookup, "withGatewaySessionStoreTarget")
+    .spyOn(sessionAuthorization, "resolveSessionMutationAuthorizationAsync")
     .mockImplementation(readWithHold);
   return {
     entered: readCaptured.promise,
