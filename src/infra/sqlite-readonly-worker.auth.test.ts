@@ -391,7 +391,7 @@ describe.each([
   );
 });
 
-it("reuses equivalent state roots and replaces changed auth environments or sources", async () => {
+it("reuses equivalent state roots and separates changed auth environments", async () => {
   const { source } = createAuthDatabase();
   const implicitEnv = { ...process.env };
   delete implicitEnv.OPENCLAW_STATE_DIR;
@@ -403,11 +403,14 @@ it("reuses equivalent state roots and replaces changed auth environments or sour
     await read(source, "canonical", undefined, explicitEnv);
     expect(spawn).toHaveBeenCalledTimes(1);
     await read(source, "canonical", undefined, changedEnv);
-    expect(vi.mocked(spawn).mock.results[0]?.value.exitCode).toBeNull();
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(spawn).mock.results.at(-1)?.value.exitCode).toBeNull();
     await read(source, "canonical", undefined, changedRoot);
-    expect(vi.mocked(spawn).mock.results[1]?.value.exitCode).toBeNull();
+    expect(spawn).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(spawn).mock.results.at(-1)?.value.exitCode).toBeNull();
     await read(source, "snapshot", undefined, changedRoot);
-    expect(vi.mocked(spawn).mock.results[2]?.value.exitCode).toBeNull();
+    expect(spawn).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(spawn).mock.results.at(-1)?.value.exitCode).toBeNull();
   });
   expect(spawn).toHaveBeenCalledTimes(3);
   await cleanupSnapshotOperations();

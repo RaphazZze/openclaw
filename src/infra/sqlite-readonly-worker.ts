@@ -275,7 +275,7 @@ export function createScopedSqliteReadOnlyWorker(
   },
 ): ReturnType<typeof createSqliteReadOnlyWorkerSession> {
   const workerUrl = resolveRuntimeProcessEntrypointUrl("sqliteReadOnly");
-  // Launch facts are captured by the caller; the reusable child belongs to its scope.
+  // Launch facts are captured before any asynchronous process admission.
   return runInDetachedAsyncContext(() =>
     createSqliteReadOnlyWorkerSession({
       ...launch,
