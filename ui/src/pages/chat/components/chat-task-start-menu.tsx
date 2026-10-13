@@ -1,13 +1,15 @@
 import { createUniqueId } from "solid-js";
+import type { TaskSuggestionsAcceptParams } from "../../../../../packages/gateway-protocol/src/index.js";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { Menu } from "../../../components/solid/menu.tsx";
 import { t } from "../../../lib/reactive/i18n.ts";
-import type { TaskSuggestionStartMode } from "./chat-task-suggestions.ts";
 
 export function ChatTaskStartMenu(props: {
   busy: boolean;
   canAccept: boolean;
-  onSelect: (mode: TaskSuggestionStartMode) => void;
+  onSelect: (
+    mode: Extract<TaskSuggestionsAcceptParams["mode"], "local" | "worktree" | "session">,
+  ) => void;
 }) {
   const id = createUniqueId();
   return (
