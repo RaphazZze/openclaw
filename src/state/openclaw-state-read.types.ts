@@ -192,7 +192,6 @@ export type OpenClawStateReadCommand =
   | { type: "cron.activeReceiptOwners"; agentId: string }
   | { type: "cron.jobNames"; jobIds: string[]; storePath?: string }
   | { type: "cron.quarantine"; storeKey: string }
-  | { type: "subagents.forChildSession"; childSessionKey: string }
   | { type: "exec-approvals.read" }
   | SqliteWorkerCommand<SkillLibraryReadOnlyOperations>
   | { type: "agentDatabaseRegistry.read" }
@@ -338,7 +337,6 @@ export type OpenClawStateReadResult =
   | { type: "operatorApprovals.validateCronGrant"; result: ConsumeCronStandingGrantResult }
   | { type: "operatorApprovals.placementGrant"; rows: PlacementGrantRows }
   | ReadResult<PluginBlobReadReply>
-  | { type: "subagents.forChildSession"; runs: SubagentRunRecord[] }
   | {
       [Kind in keyof SkillLibraryReadOnlyOperations]: {
         type: Kind;
