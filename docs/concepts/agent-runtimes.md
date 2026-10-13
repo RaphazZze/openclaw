@@ -272,28 +272,9 @@ decision, see [GitHub Copilot agent runtime](/plugins/copilot).
 ## Muse Code agent runtime
 
 The external `@openclaw/muse` plugin registers an opt-in `muse` runtime backed
-by the Muse Code CLI (`muse serve` over the Muse Session Protocol). It claims
-the standard `meta` provider and is **never** selected by `auto`. Opt in
-per-model or per-provider via `agentRuntime.id`:
-
-```json5
-{
-  agents: {
-    defaults: {
-      model: "meta/muse-spark-1.3",
-      models: {
-        "meta/muse-spark-1.3": {
-          agentRuntime: { id: "muse" },
-        },
-      },
-    },
-  },
-}
-```
-
-Muse owns its native tools, sandbox, and session state; OpenClaw's own agent
-tools are not bridged. For auth, approvals, sessions, MCP servers, and
-limitations, see [Muse Code agent runtime](/plugins/muse).
+by the Muse Code CLI for the standard `meta` provider. It is never selected by
+`auto`; set `agentRuntime.id: "muse"` on a `meta/*` model or provider. See
+[Muse Code agent runtime](/plugins/muse).
 
 ## Compatibility contract
 

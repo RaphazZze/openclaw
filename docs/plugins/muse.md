@@ -188,24 +188,15 @@ duplicate entries. A transcript write failure stops the turn.
 
 ## MCP servers
 
-Static MCP servers from OpenClaw's `mcp.servers` config are passed to each Muse
-session as session MCP servers. Supported transports:
-
-- stdio (`command`, `args`, `env`)
-- streamable HTTP (`url`, `headers`)
-
-The harness refuses SSE servers, a per-server `cwd`, requester-scoped MCP
-credentials, and bundled MCP servers that need a prepared data directory. Muse
-must grant the `sessionMcp` capability; older Muse builds without it fail with
-an upgrade message when MCP servers are configured.
+Muse owns its MCP configuration. Add MCP servers in Muse itself; OpenClaw's
+`mcp.servers` are not passed to Muse sessions.
 
 ## Limitations
 
 - OpenClaw's own agent tools (messaging, `sessions_spawn`, browser, and other
-  OpenClaw tools) are not available to Muse. MSP has no client-tool contract,
-  and OpenClaw has no generic MCP server for its agent tools yet. Muse uses its
-  native tools and the MCP servers above. Replies go back to the channel from
-  the final turn text.
+  OpenClaw tools) are not available to Muse. MSP has no client-tool contract.
+  Muse uses its native tools and its own MCP servers. Replies go back to the
+  channel from the final turn text.
 - No live steering: a message sent during an active turn waits for the turn to
   finish.
 - No native compaction, isolated completions, or `/btw` side questions through
@@ -226,44 +217,23 @@ an upgrade message when MCP servers are configured.
 
 ## Live tests
 
-Two gated live suites run against the real `muse` binary
-(`OPENCLAW_MUSE_BIN` overrides the path):
-
 ```bash
-# No credentials needed: handshake, session start/resume, auth error, interrupt, exit
+# Real `muse` binary, no credentials: handshake, start/resume, auth error, interrupt, exit
 OPENCLAW_MUSE_LIVE_HOST=1 node scripts/run-vitest.mjs \
   --config test/vitest/vitest.live.config.ts extensions/muse/src/runtime.live.test.ts
 
-# Real model turn: uses OPENCLAW_MUSE_LIVE_KEY, or a file-backed Muse login
-# (`TBH_CREDENTIAL_BACKEND=file muse login`) staged from OPENCLAW_MUSE_LIVE_CONFIG_HOME
-OPENCLAW_MUSE_LIVE_TEST=1 OPENCLAW_MUSE_LIVE_KEY=<key> node scripts/run-vitest.mjs \
-  --config test/vitest/vitest.live.config.ts extensions/muse/src/runtime.live.test.ts
-```
-
-`OPENCLAW_MUSE_LIVE_MODEL` selects the model for the real turn (default
-`muse-spark-1.3`).
-
-Package-installed Docker coverage uses disposable Gateways and container-only
-credentials (no host auth files are mounted):
-
-```bash
-# Offline after setup: fake MSP boundary, session reuse/restart/reset,
-# approval allow/deny, and restrictive-policy refusal.
+# Docker, offline after setup: fake MSP host behind a real Gateway
 pnpm test:docker:muse-runtime
 
-# Real Muse: approve the printed MUSE_DEVICE_CODE in the browser.
+# Docker, real Muse: approve the printed MUSE_DEVICE_CODE in the browser,
+# or pass OPENCLAW_MUSE_LIVE_KEY=<key> instead of device auth
 OPENCLAW_MUSE_LIVE_AUTH=device pnpm test:docker:live-muse
-
-# Or use an API key passed only into the container.
-OPENCLAW_MUSE_LIVE_KEY=<key> pnpm test:docker:live-muse
 ```
 
-The live lane is opt-in only, including in the Docker scheduler:
-`OPENCLAW_DOCKER_ALL_LANES=live-muse pnpm test:docker:all`. It verifies a real
-reply, native session recall after a Gateway restart, an allow-once shell
-approval, and an actionable sign-in error in the Gateway log after `muse logout`. Device
-login waits up to ten minutes. `META_API_KEY` is also accepted in API-key mode;
-device mode ignores host keys. All credentials disappear with the container.
+The Docker lanes use disposable Gateways; credentials live only in the
+container. The live lane is opt-in and checks a real reply, recall after a
+Gateway restart, an allow-once shell approval, and the sign-in error after
+`muse logout`.
 
 ## Related
 

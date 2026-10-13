@@ -9,15 +9,11 @@ import {
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import musePackage from "../package.json" with { type: "json" };
 
-export type MuseMcpServer =
-  | { transport: "stdio"; command: string; args?: string[]; env?: Record<string, string> }
-  | { transport: "streamableHttp"; url: string; headers?: Record<string, string> };
 export type MuseOpenSession = {
   sessionId?: string;
   workspace: string;
   modelId: string;
   approvalMode: "allowAll" | "promptUnmatched" | "denyUnmatched";
-  mcpServers: Record<string, MuseMcpServer>;
   /** Reports a refused resume that was replaced by a new Muse session. */
   onResumeRefused?: (message: string) => void;
 };
@@ -60,20 +56,20 @@ export async function openMuseSession(runtime: MuseRuntime, options: MuseOpenSes
     }
   }
   const { connection } = runtime.host;
-  const config = Object.keys(options.mcpServers).length
-    ? { mcpServers: options.mcpServers }
-    : undefined;
-  if (config && !runtime.host.initializeResult.grantedCapabilities.includes("sessionMcp")) {
-    throw new Error(
-      "This Muse host does not support session MCP servers. Upgrade Muse or remove the MCP configuration.",
-    );
-  }
+  const start = () =>
+    connection.command("session/start", {
+      workspaceRoot: options.workspace,
+      modelId: options.modelId,
+      providerId: "meta",
+      approvalMode: options.approvalMode,
+    });
   let result: Record<string, unknown>;
-  if (options.sessionId) {
+  if (!options.sessionId) {
+    result = await start();
+  } else {
     try {
       result = await connection.command("session/resume", {
         sessionId: options.sessionId,
-        ...(config ? { config } : {}),
         excludeItems: true,
       });
     } catch (error) {
@@ -89,22 +85,8 @@ export async function openMuseSession(runtime: MuseRuntime, options: MuseOpenSes
           : error;
       }
       options.onResumeRefused?.(`Muse could not resume session (${error.kind}): ${error.message}`);
-      result = await connection.command("session/start", {
-        workspaceRoot: options.workspace,
-        modelId: options.modelId,
-        providerId: "meta",
-        approvalMode: options.approvalMode,
-        ...(config ? { config } : {}),
-      });
+      result = await start();
     }
-  } else {
-    result = await connection.command("session/start", {
-      workspaceRoot: options.workspace,
-      modelId: options.modelId,
-      providerId: "meta",
-      approvalMode: options.approvalMode,
-      ...(config ? { config } : {}),
-    });
   }
   if (!isRecord(result.session) || typeof result.session.sessionId !== "string") {
     throw new Error("Muse returned an invalid session identity.");
@@ -189,7 +171,6 @@ export class MusePool {
     try {
       const host = await handshake.initialize({
         clientInfo: { name: "openclaw", version: musePackage.version },
-        capabilities: { requestedCapabilities: ["sessionMcp"] },
       });
       const runtime: MuseRuntime = {
         host,

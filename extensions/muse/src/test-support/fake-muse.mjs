@@ -89,7 +89,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     reply(id, {
       serverInfo: { name: "fake_muse", version: "1" },
       schema: { fingerprint: EXPECTED_SCHEMA_FINGERPRINT, version: 1 },
-      grantedCapabilities: ["sessionMcp"],
+      grantedCapabilities: [],
       experimentalApi: false,
       platformOs: "linux",
     });

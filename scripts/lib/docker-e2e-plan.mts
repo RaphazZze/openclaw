@@ -11,7 +11,6 @@ import {
   allReleasePathLanes,
   mainLanes,
   normalizeReleaseProfile,
-  optInLanes,
   publicInstallerLanes,
   releasePathChunkLanes,
   tailLanes,
@@ -663,7 +662,6 @@ export function findLaneByName(name: string): DockerE2eLane | undefined {
     [
       ...allReleasePathLanes({ includeOpenWebUI: true }),
       ...publicInstallerLanes,
-      ...optInLanes,
       ...mainLanes,
       ...tailLanes,
     ],
@@ -896,7 +894,6 @@ export function resolveDockerE2ePlan(options: DockerE2ePlanOptions) {
       releaseProfile: "full",
     }),
     ...publicInstallerLanes,
-    ...optInLanes,
     ...mainLanes,
     ...tailLanes,
   ]);

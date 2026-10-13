@@ -40,7 +40,6 @@ export async function consumeTurn(
   const streamed = new Map<string, string>();
   const emitted = new Map<string, number>();
   const settled = new Set<string>();
-  const toolMetas: Array<{ toolName: string; meta?: string }> = [];
   let visibleText = "";
   let messageStarted = false;
   let streamQueue = Promise.resolve();
@@ -134,7 +133,6 @@ export async function consumeTurn(
           isError: item.status !== "completed",
           timestamp: Date.now(),
         });
-        toolMetas.push({ toolName });
         params.observeToolTerminal?.({
           toolCallId: id,
           toolName,
@@ -185,5 +183,5 @@ export async function consumeTurn(
     }
   })();
   await Promise.all([projections, deltas]);
-  return { toolMetas, visibleText, outcome: await turn.completed };
+  return { visibleText, outcome: await turn.completed };
 }

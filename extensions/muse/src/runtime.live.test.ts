@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isLiveTestEnabled } from "openclaw/plugin-sdk/test-live";
@@ -19,12 +19,10 @@ describeHost("real Muse MSP host", () => {
       if (runtime.host.fingerprintWarning) {
         expect(runtime.host.fingerprintWarning.kind).toBe("schemaFingerprintMismatch");
       }
-      expect(runtime.host.initializeResult.grantedCapabilities).toEqual(expect.any(Array));
       const session = await openMuseSession(runtime, {
         workspace,
         modelId: "muse-spark-1.3",
         approvalMode: "denyUnmatched",
-        mcpServers: {},
       });
       const resumed = await runtime.host.connection.command("session/resume", {
         sessionId: session.sessionId,
@@ -58,50 +56,6 @@ describeHost("real Muse MSP host", () => {
       await pool.dispose();
       await runtime.host.exited;
       expect(runtime.dead).toBe(true);
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-});
-
-const describeModel = isLiveTestEnabled(["OPENCLAW_MUSE_LIVE_TEST"]) ? describe : describe.skip;
-describeModel("real Muse model", () => {
-  it("completes a short streaming model turn", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "openclaw-muse-model-"));
-    const pool = new MusePool(process.env.OPENCLAW_MUSE_BIN ?? "muse");
-    // The test runner isolates XDG_CONFIG_HOME, so a file-backed Muse login
-    // (`TBH_CREDENTIAL_BACKEND=file muse login`) is staged from its config dir.
-    const loginConfigHome = process.env.OPENCLAW_MUSE_LIVE_CONFIG_HOME;
-    if (loginConfigHome && process.env.XDG_CONFIG_HOME) {
-      await mkdir(join(process.env.XDG_CONFIG_HOME, "muse"), { recursive: true });
-      await copyFile(
-        join(loginConfigHome, "muse", "auth.json"),
-        join(process.env.XDG_CONFIG_HOME, "muse", "auth.json"),
-      );
-      process.env.TBH_CREDENTIAL_BACKEND = "file";
-    }
-    const lease = await pool.acquire(workspace, process.env.OPENCLAW_MUSE_LIVE_KEY, true);
-    try {
-      const session = await openMuseSession(lease.runtime, {
-        workspace,
-        modelId: process.env.OPENCLAW_MUSE_LIVE_MODEL ?? "muse-spark-1.3",
-        approvalMode: "denyUnmatched",
-        mcpServers: {},
-      });
-      const turn = await session.sendUserTurn({
-        input: [{ type: "text", text: "Reply with exactly MSP-OK. Do not use tools." }],
-      });
-      let text = "";
-      for await (const item of turn.items()) {
-        if (item.kind === "agentMessage" && item.status === "completed") {
-          text += item.text ?? "";
-        }
-      }
-      const outcome = await turn.completed;
-      expect(outcome).toMatchObject({ kind: "completed", params: { terminal: "completed" } });
-      expect(text).toContain("MSP-OK");
-    } finally {
-      lease.release();
-      await pool.dispose();
       await rm(workspace, { recursive: true, force: true });
     }
   });

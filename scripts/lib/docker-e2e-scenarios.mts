@@ -640,20 +640,6 @@ export const publicInstallerLanes: DockerE2eLane[] = [
   }),
 ];
 
-// Interactive device authorization is intentionally never selected by an all-lanes run.
-export const optInLanes: DockerE2eLane[] = [
-  liveLane("live-muse", {
-    command: liveDockerScriptCommand("e2e/muse-live-docker.sh"),
-    e2eImageKind: "bare",
-    needsPackage: true,
-    provider: "meta",
-    resources: ["npm", "service"],
-    stateScenario: "empty",
-    timeoutMs: 30 * 60 * 1000,
-    noOutputTimeoutMs: 12 * 60 * 1000,
-  }),
-];
-
 const releasePathPackageUpdateOpenAiLanes = [
   liveLane("openai-chat-tools", {
     e2eImageKind: "functional",

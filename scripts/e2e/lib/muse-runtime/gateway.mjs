@@ -103,28 +103,14 @@ export async function createHarness() {
         onHelloOk: () => resolve(connection),
         onConnectError: reject,
         onEvent: (event) => {
-          const pending =
-            event.event === "plugin.approval.requested"
-              ? { id: event.payload?.id, request: event.payload?.request, kind: "plugin" }
-              : event.event === "session.approval" && event.payload?.phase === "pending"
-                ? {
-                    id: event.payload.approval.id,
-                    request: event.payload.approval.presentation,
-                    kind: event.payload.approval.presentation.kind,
-                  }
-                : undefined;
-          if (
-            !pending ||
-            !activeApprovals ||
-            activeApprovals.some((seen) => seen.id === pending.id)
-          ) {
+          if (event.event !== "plugin.approval.requested" || !activeApprovals) {
             return;
           }
-          activeApprovals.push(pending);
+          activeApprovals.push(event.payload);
           connection
             .request("approval.resolve", {
-              id: pending.id,
-              kind: pending.kind,
+              id: event.payload.id,
+              kind: "plugin",
               decision: activeDecision ?? "deny",
             })
             .catch((error) => {
@@ -133,11 +119,6 @@ export async function createHarness() {
         },
       });
       connection.start();
-    });
-    // Chat-turn approvals route to clients watching that session, like the Control UI.
-    await client.request("sessions.messages.subscribe", {
-      key: sessionKey,
-      includeApprovals: true,
     });
   }
   async function turn(message, { decision, expectError = false } = {}) {

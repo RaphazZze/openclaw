@@ -22,7 +22,6 @@ import {
 } from "openclaw/plugin-sdk/session-transcript-runtime";
 import { createApprovalHandler } from "./src/approvals.js";
 import { consumeTurn } from "./src/events.js";
-import { loadMuseMcpServers } from "./src/mcp.js";
 import { credentialFingerprint, MusePool, openMuseSession } from "./src/runtime.js";
 
 export type MuseSessionBinding = { sessionId: string; compatibility: string };
@@ -114,14 +113,12 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         : security === "full" && ask === "off"
           ? "allowAll"
           : "promptUnmatched";
-      const mcpServers = await loadMuseMcpServers(params);
       const compatibility = JSON.stringify([
         workspace,
         params.modelId,
         credentialFingerprint(apiKey),
         readOnly,
         approvalMode,
-        credentialFingerprint(JSON.stringify(mcpServers)),
       ]);
       params.hostCapabilities.assertActive();
       const lease = await pool.acquire(workspace, apiKey, readOnly);
@@ -134,7 +131,6 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
       let abortPromise: Promise<void> | undefined;
       let failure: unknown;
       const messages: AgentMessage[] = [];
-      let toolMetas: AgentHarnessAttemptResult["toolMetas"] = [];
       let text = "";
       let assistantTranscriptOwned = false;
       let finalKey: string | undefined;
@@ -218,7 +214,6 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
           workspace,
           modelId: params.modelId,
           approvalMode,
-          mcpServers,
           onResumeRefused: (message) => {
             options.logger?.warn(`${message}; started a new Muse session.`);
           },
@@ -286,7 +281,6 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
           messages.push(...group);
           assistantTranscriptOwned = finalKey !== undefined;
         });
-        toolMetas = result.toolMetas;
         text = result.visibleText;
         if (result.outcome.kind !== "completed") {
           throw new Error(`Muse turn ended without a terminal result (${result.outcome.kind}).`);
@@ -320,11 +314,9 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         bound?.release();
         lease.release();
       }
-      if (!toolMetas.length) {
-        toolMetas = messages
-          .filter((message) => message.role === "toolResult")
-          .map((message) => ({ toolName: message.toolName }));
-      }
+      const toolMetas = messages
+        .filter((message) => message.role === "toolResult")
+        .map((message) => ({ toolName: message.toolName }));
       const interruption = timedOut
         ? { kind: "timeout" as const, phase: "prompt" as const, source: "runtime" as const }
         : aborted
