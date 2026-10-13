@@ -129,8 +129,15 @@ function createMaintenanceRuntime(params: {
     cancelSessionWork: vi.fn(async () => {}),
     placements: {
       workspaceResultInstanceId: () => "gateway-test",
-      get: (sessionId: string) =>
+      subscribeChanges: () => () => {},
+      getAsync: async (sessionId: string) =>
         params.placements.find((placement) => placement.sessionId === sessionId),
+      getManyAsync: async (sessionIds: readonly string[]) =>
+        new Map(
+          params.placements
+            .filter((placement) => sessionIds.includes(placement.sessionId))
+            .map((placement) => [placement.sessionId, placement]),
+        ),
       listAsync: async () => params.placements,
       listForReconcileAsync: async (sessionKey?: string) =>
         params.preservationStore
@@ -151,7 +158,7 @@ function createMaintenanceRuntime(params: {
               assertCurrent: () => {},
               release: () => {},
             },
-      retireSessionPlacement: vi.fn(),
+      retireSessionPlacementAsync: vi.fn(async () => {}),
       pruneOrphanedWorkspaceReconciliations: async () => {
         await params.onRecovery?.();
         if (params.recoveryError) {

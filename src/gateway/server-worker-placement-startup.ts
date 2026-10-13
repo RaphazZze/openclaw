@@ -8,6 +8,10 @@ import { formatErrorMessage } from "../infra/errors.js";
 import type { GatewayScheduler } from "../infra/gateway-scheduler.js";
 import { getGatewayRestartDrainSignal } from "../process/gateway-work-admission.js";
 import { onSessionIdentityMutation } from "../sessions/session-lifecycle-events.js";
+import {
+  sessionChanges,
+  sessionChangeScopeAffectsStoredRows,
+} from "../sessions/session-row-changes.js";
 import { runInDetachedAsyncContext } from "../shared/detached-async-context.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import { createGitHubPublicationRuntime } from "./github-publication-runtime.js";
@@ -506,12 +510,30 @@ export function createGatewayWorkerPlacementRuntime(
         // Each operation reports its own failure before releasing its slot.
       }
     };
+    const uninstallPlacementRetirementChanges = params.placements.subscribeChanges((placement) => {
+      sessionRetirement.markPending(placement.sessionId);
+    });
+    const uninstallSessionRetirementInvalidation = sessionChanges.subscribeFacts((change) => {
+      if ("all" in change) {
+        if (change.scope === "config" || sessionChangeScopeAffectsStoredRows(change)) {
+          sessionRetirement.invalidateAll();
+        }
+      } else if (
+        change.factsInvalidated === true &&
+        change.scope !== "transcript" &&
+        sessionChangeScopeAffectsStoredRows(change)
+      ) {
+        // Unknown storage outcomes have no committed identity to enqueue.
+        sessionRetirement.invalidateAll();
+      }
+    });
     const uninstallSessionIdentityMutation = onSessionIdentityMutation((mutation) =>
       // Reconciliation belongs to the Gateway, not the notifying request's cancellation scope.
       runInDetachedAsyncContext(() => {
         const previousSessionId = mutation.previous.sessionId;
         const currentSessionId = "current" in mutation ? mutation.current.sessionId : undefined;
         if (previousSessionId && previousSessionId !== currentSessionId) {
+          sessionRetirement.markPending(previousSessionId);
           const pending = operations.get("reconcile");
           if (!pending) {
             void reconcileActivePlacements();
@@ -538,6 +560,8 @@ export function createGatewayWorkerPlacementRuntime(
           params.environments.stopNodeEnrollmentWaits?.();
           scope.beginClose();
           uninstallSessionIdentityMutation();
+          uninstallPlacementRetirementChanges();
+          uninstallSessionRetirementInvalidation();
           uninstallSessionMaintenancePreservation();
           uninstallPlacementAdmission();
         }

@@ -200,6 +200,8 @@ async function withRecoveryRuntime(
       placements: {
         workspaceResultInstanceId: () => "gateway-test",
         getAsync: async (sessionId: string) => placements.get(sessionId),
+        getManyAsync: async (sessionIds: readonly string[]) =>
+          new Map([...placements].filter(([sessionId]) => sessionIds.includes(sessionId))),
         listAsync: async () => [...placements.values()],
         readChangeSnapshot,
         subscribeChanges: (listener: PublishPlacementChange) => {
