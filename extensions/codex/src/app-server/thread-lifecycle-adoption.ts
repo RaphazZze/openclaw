@@ -60,7 +60,11 @@ export async function withCodexThreadLifecycleBinding(
     agentId: params.agentId ?? params.params.agentId,
     config: params.params.config,
   });
-  const { binding: snapshot, authority } = await resolveCodexSessionBinding({
+  const {
+    binding: snapshot,
+    authority,
+    release,
+  } = await resolveCodexSessionBinding({
     reclaimStale: true,
     authority: params.authority,
     bindingStore: params.bindingStore,
@@ -77,6 +81,7 @@ export async function withCodexThreadLifecycleBinding(
           assertCodexSessionRuntimeOwnership(binding, params.params.expectedSessionRuntimeOwnership)
       : undefined,
   });
+  using _bindingAuthority = { [Symbol.dispose]: release };
   const assertCurrent = authority.assertCurrent;
   const runWithLease = () =>
     params.bindingStore.withLease(

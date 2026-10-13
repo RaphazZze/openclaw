@@ -1,7 +1,7 @@
 import path from "node:path";
 import { buildSessionEntry } from "openclaw/plugin-sdk/memory-core-host-engine-sessions";
 import {
-  listSessionEntries,
+  listSessionEntriesAsync,
   loadTranscriptEvents,
   resolveStorePath,
   type SessionEntry,
@@ -417,7 +417,7 @@ async function readRawQaSessionStore(
   const runtimeEnv = qaSessionRuntimeEnv(env.gateway.tempRoot);
   const agentId = readNonEmptyString(options.agentId) ?? "qa";
   return Object.fromEntries(
-    listSessionEntries({ agentId, env: runtimeEnv }).map(({ sessionKey, entry }) => [
+    (await listSessionEntriesAsync({ agentId, env: runtimeEnv })).map(({ sessionKey, entry }) => [
       sessionKey,
       entry,
     ]),
