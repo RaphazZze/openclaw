@@ -109,6 +109,7 @@ export function subscribeGatewayWorkerPlacementMetadataChanges(params: {
     // Claim closure ends caller work; this Gateway batch reads the committed snapshot.
     pending = runOutsideAsyncWorkScope(() =>
       Promise.resolve().then(async () => {
+        let retryClosed = true;
         try {
           while (profiles.size || nodes.size || closedSessions.size) {
             const batch = [...profiles];
@@ -165,6 +166,7 @@ export function subscribeGatewayWorkerPlacementMetadataChanges(params: {
                   { accessChanged: false },
                 );
               }
+              retryClosed = true;
             } catch (error) {
               try {
                 params.warn(
@@ -173,6 +175,16 @@ export function subscribeGatewayWorkerPlacementMetadataChanges(params: {
               } catch {
                 // Best-effort reporting must not leak a rejected background operation.
               }
+              if (stopped) {
+                return;
+              }
+              // Retry once; later failures wait for a real change, including one queued during this read.
+              const queuedChanges = profiles.size || nodes.size || closedSessions.size;
+              closed.forEach((sessionId) => closedSessions.add(sessionId));
+              if (!retryClosed && !queuedChanges) {
+                return;
+              }
+              retryClosed = Boolean(queuedChanges);
             }
           }
         } finally {

@@ -61,7 +61,7 @@ export type WireGateway = QaGatewayChild;
 type WireGatewayEvent = { event: string; payload?: unknown };
 
 export function createWireWorkspaceSettlementWaiter() {
-  const waiting = new Map<string, ReturnType<typeof createDeferred<void>>>();
+  const waiting = new Map<string, { resolve: () => void; refresh: () => Promise<void> }>();
   const settled = (placement: unknown) =>
     isRecord(placement) &&
     placement.state === "active" &&
@@ -72,10 +72,16 @@ export function createWireWorkspaceSettlementWaiter() {
         return;
       }
       const session = event.payload.session;
-      if (isRecord(session) && settled(session.placement)) {
-        const key = event.payload.sessionKey ?? session.key;
-        if (typeof key === "string") {
+      const key = event.payload.sessionKey ?? (isRecord(session) ? session.key : undefined);
+      if (isRecord(session)) {
+        if (settled(session.placement) && typeof key === "string") {
           waiting.get(key)?.resolve();
+        }
+      } else {
+        // Preparation failures publish a refresh notice instead of a session snapshot.
+        const entries = typeof key === "string" ? [waiting.get(key)] : waiting.values();
+        for (const entry of entries) {
+          void entry?.refresh();
         }
       }
     },
@@ -85,16 +91,24 @@ export function createWireWorkspaceSettlementWaiter() {
       signal: AbortSignal,
     ) {
       const changed = createDeferred();
-      waiting.set(key, changed);
-      try {
-        // Register before the current read so fast reconciliation needs no later event.
-        const current = await client.request<{ session: { placement?: unknown } }>(
-          "sessions.describe",
-          { key },
-        );
-        if (!settled(current.session.placement)) {
-          await withinTest(changed.promise, signal);
+      const refresh = async () => {
+        try {
+          const current = await client.request<{ session: { placement?: unknown } }>(
+            "sessions.describe",
+            { key },
+          );
+          if (settled(current.session.placement)) {
+            changed.resolve();
+          }
+        } catch (error) {
+          changed.reject(error);
         }
+      };
+      // Register before the current read so fast reconciliation needs no later event.
+      waiting.set(key, { resolve: changed.resolve, refresh });
+      try {
+        void refresh();
+        await withinTest(changed.promise, signal);
       } finally {
         waiting.delete(key);
       }
