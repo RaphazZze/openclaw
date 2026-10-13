@@ -47,6 +47,7 @@ export interface SessionDataControllerHost extends ReactiveControllerHost {
   readonly connected: boolean;
   readonly activeRouteId?: string;
   readonly sessionCatalogRowsVisible: boolean;
+  readonly sidebarReferencedSessionKeys: readonly string[];
   samePresence(previous: PresencePayload | undefined, next: PresencePayload | undefined): boolean;
   getRouteSessionKey(): string;
   readonly sessionDataContext: ApplicationContext | undefined;

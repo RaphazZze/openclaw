@@ -1,6 +1,10 @@
 import { consume } from "@lit/context";
 import { property, state } from "lit/decorators.js";
-import { DEFAULT_SIDEBAR_ENTRIES, type NavigationRouteId } from "../app-navigation.ts";
+import {
+  DEFAULT_SIDEBAR_ENTRIES,
+  parseSidebarEntry,
+  type NavigationRouteId,
+} from "../app-navigation.ts";
 import type { ApplicationRouter } from "../app-routes.ts";
 import { selectApplicationSession } from "../app/agent-selection.ts";
 import {
@@ -47,6 +51,12 @@ export abstract class AppSidebarBase extends OpenClawLightDomContentsElement {
   @property({ attribute: false }) canPairDevice = false;
   @property({ attribute: false }) sessionKey = "";
   @property({ attribute: false }) sidebarEntries: readonly string[] = DEFAULT_SIDEBAR_ENTRIES;
+  get sidebarReferencedSessionKeys(): readonly string[] {
+    return this.sidebarEntries.flatMap((value) => {
+      const entry = parseSidebarEntry(value);
+      return entry?.type === "session" ? [entry.key] : [];
+    });
+  }
   @property({ attribute: false }) navigationVisible = true;
   @property({ type: Boolean }) navigationCollapsed = false;
   @state() navigationView: "pages" | "sessions" | "online" = "sessions";
