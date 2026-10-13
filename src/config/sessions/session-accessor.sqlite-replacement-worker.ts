@@ -8,6 +8,10 @@ import {
   SqliteWorkerError,
 } from "../../infra/sqlite-worker-contract.js";
 import {
+  readDatabasePathIdentitySync,
+  type DatabasePathIdentity,
+} from "../../infra/sqlite-worker-identity.js";
+import {
   createSqliteWorkerOperationAdmission,
   type SqliteWorkerOperationAdmission,
   type SqliteWorkerAdmissionRequest,
@@ -25,10 +29,7 @@ import type {
   AgentDatabaseOperations,
   OpenClawAgentDatabaseExecution,
 } from "../../state/openclaw-agent-execution-contract.js";
-import {
-  captureOpenClawAgentDatabaseExecution,
-  captureOpenClawAgentDatabasePreparationExecution,
-} from "../../state/openclaw-agent-execution.js";
+import { captureOpenClawAgentDatabaseExecution } from "../../state/openclaw-agent-execution.js";
 import { runOpenClawAgentWorkerWrite } from "../../state/openclaw-agent-write-admission.js";
 import type { captureNativeSessionWorkerDeletion } from "./session-accessor.sqlite-deletion.js";
 import {
@@ -92,6 +93,7 @@ export async function withSessionEntryWorker<T>(
   ) => boolean,
   releaseSource?: () => void | Promise<void>,
   operationMode: "write" | "prepared-read" = "write",
+  expectedCreationIdentity?: DatabasePathIdentity,
 ): Promise<T> {
   let execution: OpenClawAgentDatabaseExecution;
   let env: SessionEntryCommitContext["env"];
@@ -100,18 +102,25 @@ export async function withSessionEntryWorker<T>(
       assertAgentSessionWriteAdmission(options);
     }
     env = Object.freeze({ ...(options.env ?? process.env) });
-    const expectedIdentity = databaseIdentity
-      ? {
-          kind: "file" as const,
-          physicalIdentity: databaseIdentity,
-          nativeLocation: options.path,
-        }
-      : undefined;
+    const targetIdentity =
+      !retainedExecution && !databaseIdentity && !expectedCreationIdentity
+        ? readDatabasePathIdentitySync(options.path)
+        : undefined;
     execution =
       retainedExecution ??
-      (operationMode === "write"
-        ? captureOpenClawAgentDatabasePreparationExecution(options, expectedIdentity)
-        : captureOpenClawAgentDatabaseExecution(options, { expectedIdentity }));
+      captureOpenClawAgentDatabaseExecution(options, {
+        expectedCreationIdentity: databaseIdentity
+          ? undefined
+          : (expectedCreationIdentity ??
+            (targetIdentity?.key.startsWith("path:") ? targetIdentity : undefined)),
+        expectedIdentity: databaseIdentity
+          ? {
+              kind: "file",
+              physicalIdentity: databaseIdentity,
+              nativeLocation: options.path,
+            }
+          : undefined,
+      });
   } catch (error) {
     try {
       await releaseSource?.();
