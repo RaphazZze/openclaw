@@ -12,6 +12,7 @@ import {
   appendTranscriptMessage,
   loadTranscriptEvents,
 } from "../../config/sessions/session-accessor.transcript.js";
+import { captureSessionActorStorageOwner } from "../../config/sessions/session-actor-storage-binding.js";
 import { readSessionEntryReadOnlyInWorker } from "../../config/sessions/session-entry-read-runtime.js";
 import { appendPreparedTranscriptEvent } from "../../config/sessions/session-transcript-event.js";
 import { waitForSessionTranscriptIndexReconcile } from "../../config/sessions/session-transcript-reconcile.js";
@@ -137,6 +138,28 @@ export function invokeMessageCut(
 }
 
 export async function readMutationStorage(scope: SourceScope) {
+  const memory = captureSessionActorStorageOwner(scope, { assertCurrent() {}, authorize() {} });
+  if (memory) {
+    const snapshots = memory.owner?.listSessions(memory.authority) ?? [];
+    return {
+      source: await readSessionEntryReadOnlyInWorker(scope),
+      history: await loadTranscriptEvents(scope),
+      sessions: memory.owner?.listSessionEntries(memory.authority) ?? [],
+      // Include retired windows so a rejected cut cannot leave orphaned private history.
+      transcripts: await Promise.all(
+        snapshots.flatMap((snapshot) =>
+          snapshot.dependencySessionIds.map(async (sessionId) => ({
+            sessionId,
+            events: await loadTranscriptEvents({
+              ...scope,
+              sessionKey: snapshot.target.sessionKey,
+              sessionId,
+            }),
+          })),
+        ),
+      ),
+    };
+  }
   const options = toDatabaseOptions(resolveSqliteScope(scope));
   const source = await readSessionEntryReadOnlyInWorker(scope);
   const history = await loadTranscriptEvents(scope);

@@ -13,11 +13,10 @@ import {
   type SkillsLibraryActivateParams,
   type SkillLibrarySelection,
 } from "../../../packages/gateway-protocol/src/index.js";
+import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
 import { patchSessionEntryCore } from "../../config/sessions/session-accessor.js";
 import { retainPreparedSessionEntryPredicate } from "../../config/sessions/session-accessor.sqlite-entry-cache-publication-state.js";
-import { getSessionActorStorageBinding } from "../../config/sessions/session-actor-storage-binding.js";
 import { captureSessionEntryCurrentCheckAsyncInternal } from "../../config/sessions/session-entry-current-check.js";
-import { captureIncognitoSessionBinding } from "../../config/sessions/session-incognito-binding.js";
 import {
   sessionEntryCommitGuardOptions,
   prepareSessionSourceAuthority,
@@ -39,12 +38,8 @@ import { captureSkillLibraryAccess } from "../../skills/library/store-access.js"
 import { projectSkillLibraryList, type SkillLibraryAuthority } from "../../skills/library/store.js";
 import { SkillLibraryError } from "../../skills/skill-library-error.js";
 import { resolvePluginSessionOwnershipError } from "../session-plugin-ownership.js";
-import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import { resolveSessionMutationAuthorizationAsync } from "../session-sharing-authorization-async.js";
-import {
-  captureIncognitoSessionMutationFacts,
-  captureSessionActorMutationFacts,
-} from "../session-sharing-incognito.js";
+import { captureSessionSharingMemoryFacts } from "../session-sharing-incognito.js";
 import type { SessionSharingTarget } from "../session-sharing-policy.js";
 import {
   captureSessionMutationRouting,
@@ -54,7 +49,6 @@ import {
   prepareProjectedSessionSharing,
   prepareSessionSharingProfiles,
 } from "../session-sharing-read.js";
-import { prepareSessionSharingSource } from "../session-sharing-source.js";
 import {
   authorizeSessionSharingTarget,
   SessionMutationAuthorizationChangedError,
@@ -156,15 +150,21 @@ export async function activateLibrarySelection(
       sessionActivation: "next-turn" as const,
     };
   } finally {
-    await selected?.release?.();
+    await selected.release();
   }
 }
 
-async function selectedSession(options: SkillLibraryRequestOwner, sessionKey: string) {
+async function selectedSession(
+  options: SkillLibraryRequestOwner,
+  sessionKey: string,
+): Promise<{
+  target: SessionSharingTarget;
+  source: SessionSourceAssertion;
+  assertCurrent: () => void;
+  release: () => void | Promise<void>;
+}> {
   const sourceCfg = options.context.getRuntimeConfig();
-  const memory = getSessionActorStorageBinding({ sessionKey });
-  const binding = memory ? undefined : captureIncognitoSessionBinding({ sessionKey });
-  if (!memory && !binding && !isIncognitoSessionKey(sessionKey)) {
+  if (!isIncognitoSessionKey(sessionKey)) {
     const profiles = await prepareSessionSharingProfiles(options.client);
     const { agentId } = resolveSessionStoreIdentity({ cfg: sourceCfg, sessionKey });
     const facts = await prepareSessionMutationFacts({ cfg: sourceCfg, sessionKey, agentId });
@@ -263,28 +263,30 @@ async function selectedSession(options: SkillLibraryRequestOwner, sessionKey: st
       throw error;
     }
   }
+  const identity = resolveSessionStoreIdentity({ cfg: sourceCfg, sessionKey });
   const profiles = await prepareSessionSharingProfiles(options.client);
-  const actorFacts = memory
-    ? captureSessionActorMutationFacts(memory, sessionKey, true)
-    : binding && captureIncognitoSessionMutationFacts(binding, sessionKey, true);
-  const requestedAgent = resolveRequestedSessionAgentId(sourceCfg, sessionKey);
-  if (!requestedAgent.ok) {
-    throw new SessionMutationAuthorizationChangedError(requestedAgent.error);
-  }
-  const durableFacts = actorFacts
-    ? undefined
-    : await prepareSessionMutationFacts({
-        cfg: sourceCfg,
-        sessionKey,
-        agentId: requestedAgent.agentId,
-      });
+  let active = true;
+  const actorFacts = captureSessionSharingMemoryFacts(
+    {
+      sessionKey: identity.canonicalKey,
+      agentId: identity.agentId,
+      resolved: {
+        storePath: resolveSessionStorePathCore(sourceCfg.session?.store, {
+          agentId: identity.agentId,
+        }),
+      },
+    },
+    () => {
+      if (!active) {
+        throw new SkillLibraryError("CONFLICT", "Session selection was released.");
+      }
+    },
+  );
   const assertRouting = captureSessionMutationRouting(sourceCfg);
   const resolve = (authorize = true): SessionSharingTarget => {
     const cfg = options.context.getRuntimeConfig();
     assertRouting(cfg);
-    const target = actorFacts
-      ? actorFacts.readCurrent().target
-      : durableFacts!.readCurrent(cfg).target;
+    const target = actorFacts?.readCurrent().target;
     if (!target) {
       throw new SkillLibraryError("NOT_FOUND", "Session not found.");
     }
@@ -304,48 +306,11 @@ async function selectedSession(options: SkillLibraryRequestOwner, sessionKey: st
         throw new SessionMutationAuthorizationChangedError(error);
       }
     }
-    if (!binding) {
-      return target;
-    }
-    const policy = binding.actor.sessions.readPolicy(target.storeKey);
-    if (!policy || policy.sessionId !== target.entry.sessionId) {
-      throw new SkillLibraryError("CONFLICT", "Session selection changed; refresh and retry.");
-    }
-    return {
-      ...target,
-      entry: {
-        ...target.entry,
-        skillLibrarySelections: policy.skillLibrarySelections,
-        pluginOwnerId: policy.pluginOwnerId,
-      },
-    };
+    return target;
   };
-  let held: Awaited<ReturnType<typeof prepareSessionSharingSource>> | undefined;
+  const target = resolve();
   try {
-    let target = resolve(Boolean(memory || binding || isIncognitoSessionKey(sessionKey)));
-    held = binding
-      ? await prepareSessionSharingSource(target, () => {
-          resolve();
-        })
-      : undefined;
-    if (binding) {
-      const read = await binding.actor.sessions.read(
-        {
-          assertCurrent() {
-            resolve();
-            held?.assertCurrent();
-          },
-        },
-        { sessionKey: target.storeKey },
-        binding.admissionSignal,
-      );
-      if (!read.entry) {
-        throw new SkillLibraryError("NOT_FOUND", "Session not found.");
-      }
-      target = { ...target, entry: read.entry };
-    }
     const currentTarget = () => {
-      held?.assertCurrent();
       const current = resolve();
       if (
         current.entry.sessionId !== target.entry.sessionId ||
@@ -377,7 +342,7 @@ async function selectedSession(options: SkillLibraryRequestOwner, sessionKey: st
         throw new SessionMutationAuthorizationChangedError(error);
       }
     };
-    if (memory || binding) {
+    if (actorFacts) {
       assertCurrent();
     }
     const source: SessionSourceAssertion = Object.assign(assertMutationCurrent, {
@@ -390,14 +355,12 @@ async function selectedSession(options: SkillLibraryRequestOwner, sessionKey: st
       target,
       assertCurrent,
       source,
-      async release() {
-        durableFacts?.release();
-        await held?.release();
+      release: () => {
+        active = false;
       },
     };
   } catch (error) {
-    durableFacts?.release();
-    await held?.release();
+    active = false;
     throw error;
   }
 }
@@ -480,7 +443,7 @@ export const skillsLibraryHandlers: GatewayRequestHandlers = {
         }
         return result;
       } finally {
-        await session?.release?.();
+        await session?.release();
       }
     },
   ),
@@ -512,7 +475,7 @@ export const skillsLibraryHandlers: GatewayRequestHandlers = {
           { revision: pin.revision, assertSessionAccess: session.assertCurrent },
         );
       } finally {
-        await session.release?.();
+        await session.release();
       }
     },
   ),

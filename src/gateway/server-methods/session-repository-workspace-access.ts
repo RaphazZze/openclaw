@@ -1,7 +1,6 @@
 import { retainPreparedSessionSharingFacts } from "../../config/sessions/session-accessor.sqlite-entry-cache-publication-state.js";
 import { projectSessionSharingEntry } from "../../config/sessions/session-accessor.sqlite-entry-cache.types.js";
 import type { SessionEntryCurrentFacts } from "../../config/sessions/session-entry-current.types.js";
-import { readRetainedSessionEntryFacts } from "../../config/sessions/session-entry-read-facts.js";
 import { withSessionEntryReadOnlyInWorker } from "../../config/sessions/session-entry-read-runtime.js";
 import { captureSessionEntryMetadataRead } from "../../config/sessions/session-entry-source-authority.js";
 import { isIncognitoSessionKey } from "../../routing/session-key.js";
@@ -26,7 +25,8 @@ type Operation = WorkspaceInspectionInput["operation"];
 /** Repository identity never resolves through the Gateway's local workspace defaults. */
 export async function resolveRepositoryWorkspaceAccess(
   loaded: LoadedSession,
-  context?: GatewayRequestContext,
+  context: GatewayRequestContext | undefined,
+  assertCallerCurrent: () => void,
 ) {
   const entry = loaded.entry;
   const workspaceId = entry?.repositoryWorkspaceId;
@@ -38,7 +38,7 @@ export async function resolveRepositoryWorkspaceAccess(
     sessionKey: loaded.canonicalKey,
     storePath: loaded.storePath,
   };
-  const metadata = captureSessionEntryMetadataRead(scope);
+  const metadata = captureSessionEntryMetadataRead(scope, assertCallerCurrent);
   let facts: ReturnType<typeof retainPreparedSessionSharingFacts> | undefined;
   let placementRead:
     | Awaited<ReturnType<WorkerSessionPlacementStore["prepareSessionPlacement"]>>
@@ -51,21 +51,12 @@ export async function resolveRepositoryWorkspaceAccess(
     placementRead?.release();
     unregister();
   };
-  let readCurrent: () => SessionEntryCurrentFacts | undefined = () =>
-    metadata
-      ? metadata.readCurrent()
-      : readRetainedSessionEntryFacts(
-          {
-            agentId: loaded.readSource?.agentId ?? loaded.agentId,
-            path: loaded.readSource?.path ?? loaded.storePath,
-          },
-          { sessionKeys: [loaded.canonicalKey], projection: "exact", snapshotFields: [] },
-        )?.entries.find((row) => row.sessionKey === loaded.canonicalKey)?.entry;
+  let readCurrent: () => SessionEntryCurrentFacts | undefined = () => metadata?.readCurrent();
   try {
     if (!metadata && !isIncognitoSessionKey(loaded.canonicalKey)) {
       await withSessionEntryReadOnlyInWorker(
         scope,
-        () => {},
+        assertCallerCurrent,
         async (read) => {
           if (!read.ok) {
             throw read.error;
@@ -128,6 +119,7 @@ export async function resolveRepositoryWorkspaceAccess(
       }
     };
     const assertSession = (expectedRevision?: number) => {
+      assertCallerCurrent();
       if (!active) {
         throw new Error("The cloud repository session source is unavailable.");
       }

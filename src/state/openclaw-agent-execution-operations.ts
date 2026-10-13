@@ -13,7 +13,6 @@ import type {
   SessionTranscriptExecutionReadInputs,
   SessionTranscriptExecutionReadResult,
 } from "../config/sessions/session-transcript-execution-read.types.js";
-import { withSqliteDatabaseWriteScope } from "../infra/sqlite-database-admission.js";
 import {
   deferSqliteWorkerCommitReceipt,
   takeSqliteWorkerOperationAdmissionAttachment,
@@ -645,12 +644,13 @@ export async function loadConversationRegistryOperations() {
 }
 
 export async function loadUsageCacheOperations() {
-  const {
-    acquireSessionCostUsageRefreshLockInDatabase,
-    deleteSessionCostUsageRefreshLockInDatabase,
-    pruneSessionCostUsageRollupsInDatabase,
-    writeSessionCostUsageRollupInDatabase,
-  } = await import("../infra/session-cost-usage-cache.kernel.js");
+  const [
+    { pruneSessionCostUsageRollupsInDatabase, writeSessionCostUsageRollupInDatabase },
+    { withSqliteDatabaseWriteScope },
+  ] = await Promise.all([
+    import("../infra/session-cost-usage-cache.kernel.js"),
+    import("../infra/sqlite-database-admission.js"),
+  ]);
   // Usage cache and partition writes do not change resident session facts.
   return {
     "usageCache.writeRollup": (
@@ -671,24 +671,6 @@ export async function loadUsageCacheOperations() {
       writeTransaction("session-cost-usage.rollup.prune", "Usage cache", ({ db }) => {
         withSqliteDatabaseWriteScope(db, [], () =>
           pruneSessionCostUsageRollupsInDatabase(db, input),
-        );
-        admit("commit");
-      }),
-    "usageCache.acquireLock": (
-      input: Parameters<typeof acquireSessionCostUsageRefreshLockInDatabase>[1],
-      { writeTransaction, admit },
-    ) =>
-      writeTransaction("session-cost-usage.refresh-lock.acquire", "Usage cache", ({ db }) => {
-        const result = withSqliteDatabaseWriteScope(db, [], () =>
-          acquireSessionCostUsageRefreshLockInDatabase(db, input),
-        );
-        admit("commit");
-        return result;
-      }),
-    "usageCache.releaseLock": (input: string, { writeTransaction, admit }) =>
-      writeTransaction("session-cost-usage.refresh-lock.delete", "Usage cache", ({ db }) => {
-        withSqliteDatabaseWriteScope(db, [], () =>
-          deleteSessionCostUsageRefreshLockInDatabase(db, input),
         );
         admit("commit");
       }),

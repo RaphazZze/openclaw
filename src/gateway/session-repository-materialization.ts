@@ -2,7 +2,6 @@ import os from "node:os";
 import { resolveConfiguredGitHubHost } from "../agents/github-host.js";
 import { patchSessionEntryCore } from "../config/sessions/session-accessor.js";
 import { captureSessionEntrySourceAssertion } from "../config/sessions/session-entry-source-authority.js";
-import { captureIncognitoSessionBinding } from "../config/sessions/session-incognito-binding.js";
 import {
   sessionEntryCommitGuardOptions,
   composeSessionSourceAssertion,
@@ -24,10 +23,7 @@ import {
 import { readRepositoryGitHubPublicationBranchAsync } from "./github-publication-store-async.js";
 import { parseGitHubRemoteUrl } from "./github-remote.js";
 import { prepareRepositoryPublicationRestore } from "./github-repository-publication-restore.js";
-import {
-  retainGatewaySessionEntryReadOnly,
-  withGatewaySessionEntryReadOnly,
-} from "./session-utils-read-lifetime.js";
+import { retainGatewaySessionEntryReadOnly } from "./session-utils-read-lifetime.js";
 import type { GatewaySessionEntryRead } from "./session-utils-store.js";
 import { prepareSessionWorktree } from "./session-worktree-preparation.js";
 import { withSessionRepositoryCheckpoint } from "./worker-environments/session-repository-checkpoints.js";
@@ -43,13 +39,6 @@ export async function materializeSessionRepositoryWorkspaceOnGateway(params: {
   assertCurrent: SessionSourceAssertion;
   signal?: AbortSignal;
 }): Promise<void> {
-  if (captureIncognitoSessionBinding(params)) {
-    return withGatewaySessionEntryReadOnly(
-      { cfg: params.cfg, key: params.sessionKey, agentId: params.agentId },
-      (initial, assertCurrent) =>
-        materializeCapturedRepositoryWorkspace(params, initial, assertCurrent),
-    );
-  }
   const initial = await retainGatewaySessionEntryReadOnly(
     params.sessionKey,
     params.agentId,

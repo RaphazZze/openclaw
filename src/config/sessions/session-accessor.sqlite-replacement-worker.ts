@@ -3,7 +3,10 @@ import { err, ok, type Result } from "@openclaw/normalization-core/result";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { createSqliteLifecycleAggregateError } from "../../infra/sqlite-lifecycle-errors.js";
 import { retainSqliteWorkerErrorCode } from "../../infra/sqlite-worker-contract.js";
-import { readDatabasePathIdentitySync } from "../../infra/sqlite-worker-identity.js";
+import {
+  readDatabasePathIdentitySync,
+  type DatabasePathIdentity,
+} from "../../infra/sqlite-worker-identity.js";
 import {
   createSqliteWorkerOperationAdmission,
   type SqliteWorkerOperationAdmission,
@@ -85,6 +88,7 @@ export async function withSessionEntryWorker<T>(
   ) => boolean,
   releaseSource?: () => void | Promise<void>,
   operationMode: "write" | "prepared-read" = "write",
+  expectedCreationIdentity?: DatabasePathIdentity,
 ): Promise<T> {
   let execution: OpenClawAgentDatabaseExecution;
   let env: SessionEntryCommitContext["env"];
@@ -94,25 +98,24 @@ export async function withSessionEntryWorker<T>(
     }
     env = Object.freeze({ ...(options.env ?? process.env) });
     const targetIdentity =
-      !retainedExecution && !databaseIdentity
+      !retainedExecution && !databaseIdentity && !expectedCreationIdentity
         ? readDatabasePathIdentitySync(options.path)
         : undefined;
     execution =
       retainedExecution ??
-      captureOpenClawAgentDatabaseExecution(
-        options,
-        databaseIdentity
+      captureOpenClawAgentDatabaseExecution(options, {
+        expectedCreationIdentity: databaseIdentity
+          ? undefined
+          : (expectedCreationIdentity ??
+            (targetIdentity?.key.startsWith("path:") ? targetIdentity : undefined)),
+        expectedIdentity: databaseIdentity
           ? {
-              expectedIdentity: {
-                kind: "file",
-                physicalIdentity: databaseIdentity,
-                nativeLocation: options.path,
-              },
+              kind: "file",
+              physicalIdentity: databaseIdentity,
+              nativeLocation: options.path,
             }
-          : targetIdentity?.key.startsWith("path:")
-            ? { expectedCreationIdentity: targetIdentity }
-            : {},
-      );
+          : undefined,
+      });
   } catch (error) {
     try {
       await releaseSource?.();
@@ -693,11 +696,7 @@ export async function commitSessionEntryReplacementsInWorker(
         if ("kind" in value) {
           throw new Error("Session replacement returned an unexpected native binding receipt");
         }
-        return {
-          kind: "committed",
-          value,
-          publication: value.publication,
-        };
+        return { kind: "committed", value, publication: value.publication };
       },
       lifecycle,
       {

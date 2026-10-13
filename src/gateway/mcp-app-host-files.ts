@@ -10,10 +10,6 @@ import {
 import { getRuntimeConfig } from "../config/io.js";
 import { readRetainedSessionEntryFacts } from "../config/sessions/session-entry-read-facts.js";
 import { captureSessionEntryMetadataRead } from "../config/sessions/session-entry-source-authority.js";
-import {
-  captureIncognitoSessionSource,
-  withIncognitoSessionBinding,
-} from "../config/sessions/session-incognito-binding.js";
 import { hasErrnoCode } from "../infra/errno.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { logDebug } from "../logger.js";
@@ -46,8 +42,8 @@ async function captureHostFileSession(
   target: { sessionKey: string; agentId: string },
   getConfig = getRuntimeConfig,
 ) {
-  const binding = captureIncognitoSessionSource(target);
-  const metadata = captureSessionEntryMetadataRead(target);
+  // File handles outlive their opening RPC; each file effect owns its request authority.
+  const metadata = captureSessionEntryMetadataRead(target, () => {});
   const config = getConfig();
   const assertRoutingCurrent = captureSessionMutationRouting(config, undefined, [target]);
   const loaded = metadata
@@ -73,13 +69,6 @@ async function captureHostFileSession(
         )?.entries.find((row) => row.sessionKey === loaded.canonicalKey)?.entry;
   const initial = readEntry();
   return {
-    withSource<T>(consume: () => Promise<T>): Promise<T> {
-      if (!binding || "kind" in binding) {
-        return consume();
-      }
-      binding.actor.assertReadable();
-      return withIncognitoSessionBinding(binding, consume);
-    },
     assertCurrent() {
       assertRoutingCurrent(getConfig());
       const current = readEntry();
@@ -172,53 +161,51 @@ async function withHostFile<T>(
     (await captureHostFileSession({ sessionKey, agentId: view.agentId }, () =>
       options.context.getRuntimeConfig(),
     ));
-  return session.withSource(async () => {
-    const read = await retainSessionScopedRead(options, sessionKey, view.agentId, {
-      requireMaterialized: true,
-    });
-    const assertCurrent = () => {
-      view.runtime.assertOwnerCurrent?.();
-      session.assertCurrent();
-      read?.assertCurrent();
-      options.sessionMutationAuthorization?.assertCurrent();
-      if (
-        options.signal?.aborted ||
-        options.client?.connectionSignal?.aborted ||
-        options.hasCurrentClientAuthority?.() === false ||
-        getMcpAppViewLease(view.viewId, view.runtime) !== view ||
-        view.readOnly ||
-        view.allowedAppToolNames === undefined ||
-        resolveMcpAppRequesterId(options.client) !== file.requesterId ||
-        session.readEntry()?.sessionId !== file.sessionId ||
-        session.readRoot() !== file.rootDir
-      ) {
-        throw new Error("MCP App file authority expired");
-      }
-      // File commits require a synchronous live grant. An asynchronous widget grant
-      // can authorize reads but cannot establish authority at the filesystem commit.
-      if (mutation && view.authorizeAppInteraction) {
-        const grant = view.authorizeAppInteraction();
-        if (grant !== true) {
-          if (grant instanceof Promise) {
-            void grant.catch(() => undefined);
-          }
-          throw new Error("MCP App file requires current synchronous interaction authority");
+  const read = await retainSessionScopedRead(options, sessionKey, view.agentId, {
+    requireMaterialized: true,
+  });
+  const assertCurrent = () => {
+    view.runtime.assertOwnerCurrent?.();
+    session.assertCurrent();
+    read?.assertCurrent();
+    options.sessionMutationAuthorization?.assertCurrent();
+    if (
+      options.signal?.aborted ||
+      options.client?.connectionSignal?.aborted ||
+      options.hasCurrentClientAuthority?.() === false ||
+      getMcpAppViewLease(view.viewId, view.runtime) !== view ||
+      view.readOnly ||
+      view.allowedAppToolNames === undefined ||
+      resolveMcpAppRequesterId(options.client) !== file.requesterId ||
+      session.readEntry()?.sessionId !== file.sessionId ||
+      session.readRoot() !== file.rootDir
+    ) {
+      throw new Error("MCP App file authority expired");
+    }
+    // File commits require a synchronous live grant. An asynchronous widget grant
+    // can authorize reads but cannot establish authority at the filesystem commit.
+    if (mutation && view.authorizeAppInteraction) {
+      const grant = view.authorizeAppInteraction();
+      if (grant !== true) {
+        if (grant instanceof Promise) {
+          void grant.catch(() => undefined);
         }
+        throw new Error("MCP App file requires current synchronous interaction authority");
       }
-    };
-    try {
+    }
+  };
+  try {
+    await requireMcpAppInteraction(view);
+    assertCurrent();
+    const result = await operation(file, assertCurrent);
+    if (!mutation) {
       await requireMcpAppInteraction(view);
       assertCurrent();
-      const result = await operation(file, assertCurrent);
-      if (!mutation) {
-        await requireMcpAppInteraction(view);
-        assertCurrent();
-      }
-      return result;
-    } finally {
-      read?.release();
     }
-  });
+    return result;
+  } finally {
+    read?.release();
+  }
 }
 
 export async function readMcpAppHostFile(

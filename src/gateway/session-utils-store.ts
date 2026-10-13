@@ -34,7 +34,6 @@ import type {
   QualifiedSessionEntryAccessTarget,
   SessionEntryReadScope,
 } from "../config/sessions/session-accessor.types.js";
-import { captureIncognitoSessionSource } from "../config/sessions/session-incognito-binding.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveExecPolicyForMode } from "../infra/exec-approvals-core.js";
 import { loadExecApprovalsReadOnlyAsync } from "../infra/exec-approvals-store.js";
@@ -51,23 +50,17 @@ import type { GatewayAgentOwnership } from "./agent-list.js";
 import { resolveGatewayAssistantAvatar } from "./assistant-avatar.js";
 import { tryResolveSessionCompatibilityOwnerAgentId } from "./session-request-agent.js";
 import { captureSessionMutationRouting } from "./session-sharing-preparation.js";
-import { resolveSessionStoreIdentity } from "./session-store-key.js";
 import { resolveGatewayModelThinkingProfile } from "./session-utils-model.js";
 import type { GatewaySessionStoreDiscoveryCache } from "./session-utils-store-candidates.js";
 import {
   withGatewaySessionStoreTarget,
   resolveNativeGatewaySessionStoreTargetWithStore,
 } from "./session-utils-store-lookup.js";
-import {
-  readGatewaySessionStore,
-  type GatewaySessionStoreRead,
-} from "./session-utils-store-read.js";
 import { withQualifiedGatewaySessionStoreTarget } from "./session-utils-store-retained.js";
 import {
   findCanonicalStoreMatch,
   omitInternalSessionEffectsEntries,
 } from "./session-utils-store-selection.js";
-import type { GatewaySessionStoreTargetWithStore } from "./session-utils-store.types.js";
 import type { GatewayAgentRow, SessionListModelCatalog } from "./session-utils.types.js";
 import { projectWorkerPlacementAgentRuntime } from "./worker-environments/placement-session-runtime.js";
 
@@ -144,59 +137,25 @@ export function loadIncognitoGatewaySessionEntryReadOnly(
   opts?: Pick<SessionEntryReadScope, "agentId" | "clone" | "projection" | "env"> & {
     includeStoreChildEntries?: boolean;
     targetDiscoveryCache?: GatewaySessionStoreDiscoveryCache;
-    incognitoBinding?: ReturnType<typeof captureIncognitoSessionSource>;
   },
   cfg: OpenClawConfig = getRuntimeConfig(),
 ) {
   const key = normalizeOptionalString(sessionKey) ?? "";
-  if (!isIncognitoSessionKey(key) && !opts?.incognitoBinding) {
+  if (!isIncognitoSessionKey(key)) {
     throw new Error("Durable session entries require the asynchronous Gateway reader");
   }
-  const bound = opts?.incognitoBinding;
-  const boundOwner = bound && ("kind" in bound ? bound : bound.actor);
-  const identity =
-    boundOwner && resolveSessionStoreIdentity({ cfg, sessionKey: key, agentId: opts?.agentId });
-  if (boundOwner) {
-    boundOwner.assertCurrent();
-    if (identity?.agentId !== boundOwner.agentId) {
-      throw new Error("Session target belongs to another incognito actor");
-    }
-  }
-  const boundRead: GatewaySessionStoreRead | undefined =
-    boundOwner && identity
-      ? {
-          agentId: identity.agentId,
-          storePath: boundOwner.path,
-          clone: opts?.clone,
-          options: {
-            readOnly: true,
-            exactKeys: [identity.canonicalKey],
-            projection: opts?.projection,
-          },
-        }
-      : undefined;
-  const target: GatewaySessionStoreTargetWithStore =
-    boundRead && identity
-      ? {
-          agentId: identity.agentId,
-          canonicalKey: identity.canonicalKey,
-          storeKeys: [identity.canonicalKey],
-          storePath: boundRead.storePath,
-          store: readGatewaySessionStore(boundRead),
-          readSource: boundRead.readSource,
-          capturedReadSource: boundRead.capturedReadSource,
-        }
-      : resolveNativeGatewaySessionStoreTargetWithStore({
-          cfg,
-          key,
-          exactRead: true,
-          readOnly: true,
-          projection: opts?.projection,
-          env: opts?.env,
-          targetDiscoveryCache: opts?.targetDiscoveryCache,
-          ...(opts?.clone === false ? { clone: false } : {}),
-          ...(opts?.agentId ? { agentId: opts.agentId } : {}),
-        });
+  const target = resolveNativeGatewaySessionStoreTargetWithStore({
+    cfg,
+    key,
+    exactRead: true,
+    readOnly: true,
+    projection: opts?.projection,
+    env: opts?.env,
+    targetDiscoveryCache: opts?.targetDiscoveryCache,
+    includeStoreChildEntries: opts?.includeStoreChildEntries,
+    ...(opts?.clone === false ? { clone: false } : {}),
+    ...(opts?.agentId ? { agentId: opts.agentId } : {}),
+  });
   const storePath = target.storePath;
   const store = target.store;
   const canonicalMatch = findCanonicalStoreMatch(store, target.storeKeys);

@@ -23,10 +23,7 @@ import {
 import type { SessionRowReadView } from "./session-row-prepared-read.js";
 import { getSessionRowProjection } from "./session-row-projection-access.js";
 import type { SessionRowProjection } from "./session-row-projection.js";
-import {
-  captureSessionActorMutationFacts,
-  captureSessionSharingActorBinding,
-} from "./session-sharing-incognito.js";
+import { readSessionSharingMemoryFacts } from "./session-sharing-incognito.js";
 import {
   hiddenSessionNotFound,
   resolveIncognitoSessionSharingTarget,
@@ -72,7 +69,7 @@ export function isSameSessionSharingTarget(
   );
 }
 
-/** Reuse admitted sharing facts; aliases, excluded rows, and incognito keep native custody. */
+/** Reuse admitted sharing facts; other targets retain their prepared storage custody. */
 export async function prepareSessionSharingRead(params: {
   cfg: OpenClawConfig;
   sessionKey: string;
@@ -81,7 +78,7 @@ export async function prepareSessionSharingRead(params: {
   projection?: SessionSharingReadProjection;
 }) {
   try {
-    if (captureSessionSharingActorBinding({ ...params, resolved: null })) {
+    if (isIncognitoSessionKey(params.sessionKey)) {
       return prepareSessionMutationFacts({ ...params, allowMissing: true });
     }
     const { cfg, projection } = params;
@@ -99,7 +96,6 @@ export async function prepareSessionSharingRead(params: {
       !params.preserveQualifiedAddress &&
       resident &&
       source?.path === resident.storePath &&
-      typeof source.databaseIdentity === "string" &&
       isConfiguredSessionStoreAgentId(cfg, resident.agentId) &&
       source.path === configuredSource.physicalPath
         ? { ...resident, readSource: source }
@@ -178,11 +174,7 @@ export const readProjectedSessionMutationTarget = (
   }
   const readSource = projection.readSource({ ...query, storePath: state.target.storePath });
   // Legacy selectors and filesystem aliases retain the native candidate-selection contract.
-  if (
-    !readSource ||
-    readSource.path !== state.target.storePath ||
-    typeof readSource.databaseIdentity !== "string"
-  ) {
+  if (!readSource || readSource.path !== state.target.storePath) {
     return { status: "unavailable" };
   }
   assertExistingDatabaseIdentity(
@@ -217,20 +209,19 @@ export function readSessionMutationTarget(params: {
     return { error: input.error };
   }
   try {
-    const binding = captureSessionSharingActorBinding({ ...params.targetRef, resolved: null });
-    if (binding) {
+    if (isIncognitoSessionKey(params.targetRef.sessionKey)) {
       const { agentId, canonicalKey } = resolveSessionStoreIdentity({
         cfg: params.cfg,
         ...params.targetRef,
       });
-      const facts = captureSessionActorMutationFacts(
-        binding,
-        canonicalKey,
-        true,
-        params.cfg.session?.store &&
-          resolveSessionStorePathCore(params.cfg.session.store, { agentId }),
-      );
-      return { target: facts.readCurrent().target, preparedReadSource: facts.source };
+      const facts = readSessionSharingMemoryFacts({
+        agentId,
+        sessionKey: canonicalKey,
+        resolved: {
+          storePath: resolveSessionStorePathCore(params.cfg.session?.store, { agentId }),
+        },
+      });
+      return { target: facts?.target ?? null };
     }
     const projection = getSessionRowProjection(params.context);
     const projected =

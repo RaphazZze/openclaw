@@ -135,6 +135,7 @@ describe("current-session completion media", () => {
         );
         let available = true;
         let revoked = false;
+        let deliveryWarning = "";
         const revokeOccurrence = () => {
           revoked = true;
           if (revoke === "cancel") {
@@ -179,6 +180,8 @@ describe("current-session completion media", () => {
               { ...job, ...fixture.params.deliveryPlan },
             );
             const result = await dispatchCronDelivery(fixture.params);
+            deliveryWarning =
+              result.diagnostics?.entries.map(({ message }) => message).join("\n") ?? "";
             expect(result.delivered).toBe(stage === "commit");
             if (stage === "commit") {
               expect(result).toMatchObject({
@@ -236,7 +239,7 @@ describe("current-session completion media", () => {
           if (stage === "commit") {
             // File deletion is best effort; a durable cleanup claim must stay unservable.
             const entries = await fixture.records();
-            expect(entries.length).toBeLessThanOrEqual(1);
+            expect(entries.length, deliveryWarning).toBeLessThanOrEqual(1);
             for (const entry of entries) {
               expect(entry).toMatchObject({
                 cleanupPending: true,
@@ -259,7 +262,7 @@ describe("current-session completion media", () => {
           }
         } finally {
           cron.stop();
-          await Promise.allSettled([runIsolatedAgentJob.mock.results[0]?.value]);
+          await Promise.allSettled(runIsolatedAgentJob.mock.results.map(({ value }) => value));
           admission.mockRestore();
           tts.mockRestore();
           restoreActivePluginRegistrySnapshot(registry);

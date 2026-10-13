@@ -2,7 +2,6 @@ import { resolveSessionConfiguredDefault } from "../agents/session-model-ref.js"
 import { resolveSessionParentSessionKey } from "../channels/plugins/session-conversation.js";
 import { readSessionEntriesFromStoreInWorker } from "../config/sessions/session-entry-read-runtime.js";
 import type { SessionEntryReadSource } from "../config/sessions/session-entry-read-source.types.js";
-import { captureSessionEntryMetadataRead } from "../config/sessions/session-entry-source-authority.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -22,10 +21,6 @@ import { resolveGatewaySessionStoreTargetWithStoreAsync } from "./session-utils-
 export function createGatewaySessionLineageReaderAsync(cfg: OpenClawConfig) {
   const targetDiscoveryCache: GatewaySessionStoreDiscoveryCache = new Map();
   const read = async (agentId: string, key: string, preserveQualifiedAddress: boolean) => {
-    const metadata = captureSessionEntryMetadataRead({ sessionKey: key, agentId });
-    if (metadata) {
-      return metadata.readCurrent();
-    }
     const target = await resolveGatewaySessionStoreTargetWithStoreAsync({
       cfg,
       key,

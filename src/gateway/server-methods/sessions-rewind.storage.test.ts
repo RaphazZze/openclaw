@@ -17,6 +17,7 @@ import {
   appendTranscriptMessage,
   loadSessionEntryReadOnly,
   loadTranscriptEvents,
+  patchSessionEntryCore,
   upsertSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
 import { writeSessionEntry } from "../../config/sessions/session-accessor.sqlite-entry-store.js";
@@ -25,6 +26,7 @@ import {
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
 } from "../../config/sessions/session-accessor.sqlite-scope.js";
+import { memorySessionActorOwners } from "../../config/sessions/session-actor-memory-owner.js";
 import { readSessionColdTranscript } from "../../config/sessions/session-cold-storage-state.js";
 import { runSessionColdStorageMaintenance } from "../../config/sessions/session-cold-storage.js";
 import {
@@ -47,6 +49,7 @@ import {
   resolveIncognitoOpenClawAgentSqlitePath,
   resolveOpenClawAgentSqlitePath,
   runOpenClawAgentWriteTransaction,
+  withOpenClawAgentDatabaseRuntime,
 } from "../../state/openclaw-agent-db.js";
 import { runOpenClawAgentWriteAdmission } from "../../state/openclaw-agent-write-admission.js";
 import { getSessionRepositoryWorkspaceStore } from "../../state/session-repository-workspaces.js";
@@ -219,10 +222,12 @@ async function revokeDuringWriterWait(
   const queued = createDeferredCore();
   const heldWriter = runExclusiveSqliteSessionWrite(
     resolved,
-    async () => {
-      entered.resolve();
-      await release.promise;
-    },
+    () =>
+      withOpenClawAgentDatabaseRuntime(toDatabaseOptions(resolved), async () => {
+        // Admit the native fault-injection handle before signaling the held writer.
+        entered.resolve();
+        await release.promise;
+      }),
     "session.transcript.batch",
   );
   await entered.promise;
@@ -339,24 +344,28 @@ it.each(
       const scope = await seedMessageCutSource();
       let before: Awaited<ReturnType<typeof readMutationStorage>> | undefined;
       const lockSource = async () => {
-        // Simulate the harness claiming history after admission, without rotating identity.
-        runOpenClawAgentWriteTransaction(
-          (database) => {
-            writeSessionEntry(database, scope.sessionKey, {
-              ...expectDefined(loadSessionEntryReadOnly(scope), "source before harness lock"),
-              agentHarnessId: "external-harness",
-              modelSelectionLocked: true,
-            });
-          },
-          toDatabaseOptions(resolveSqliteScope(scope)),
-        );
+        const patch = { agentHarnessId: "external-harness", modelSelectionLocked: true };
+        if (lockWhileQueued) {
+          // Fault injection bypasses the queue whose waiting mutation is under test.
+          runOpenClawAgentWriteTransaction(
+            (database) => {
+              writeSessionEntry(database, scope.sessionKey, {
+                ...expectDefined(loadSessionEntryReadOnly(scope), "source before harness lock"),
+                ...patch,
+              });
+            },
+            toDatabaseOptions(resolveSqliteScope(scope)),
+          );
+        } else {
+          expectDefined(
+            await patchSessionEntryCore(scope, () => patch),
+            "source before harness lock",
+          );
+        }
         before = await readMutationStorage(scope);
       };
       if (!lockWhileQueued) {
-        await runOpenClawAgentWriteAdmission(
-          toDatabaseOptions(resolveSqliteScope(scope)),
-          lockSource,
-        );
+        await lockSource();
       }
       const mutation = lockWhileQueued
         ? await revokeDuringWriterWait(scope, () => invokeMessageCut(method, scope), lockSource)
@@ -578,8 +587,12 @@ describe("sessions.fork storage ownership", () => {
           ? resolveIncognitoOpenClawAgentSqlitePath({ agentId: "main" })
           : resolveOpenClawAgentSqlitePath({ agentId: "main" });
         expect(fs.existsSync(databasePath)).toBe(!incognito);
-        // Worker-only stores can close successfully without a cached main-thread handle.
-        await closeOpenClawAgentDatabaseByPathAsync(databasePath);
+        if (incognito) {
+          memorySessionActorOwners.closeDatabase({ agentId: "main", path: databasePath });
+        } else {
+          // Worker-only stores can close without a cached main-thread handle.
+          await closeOpenClawAgentDatabaseByPathAsync(databasePath);
+        }
         expect(await readSessionEntryReadOnlyInWorker(childScope)).toEqual(
           incognito ? undefined : child,
         );

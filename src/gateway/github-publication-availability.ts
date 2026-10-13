@@ -16,13 +16,13 @@ import { managedWorktrees } from "../agents/worktrees/service.js";
 import type { ManagedWorktreeRecord } from "../agents/worktrees/types.js";
 import { getRuntimeConfig } from "../config/config.js";
 import { retainPreparedSessionEntryPredicate } from "../config/sessions/session-accessor.sqlite-entry-cache-publication-state.js";
-import { getSessionActorStorageBinding } from "../config/sessions/session-actor-storage-binding.js";
+import {
+  captureSessionActorStorageOwner,
+  readCapturedSessionActorEntry,
+} from "../config/sessions/session-actor-storage-binding.js";
 import { withSessionEntryReadOnlyInWorker } from "../config/sessions/session-entry-read-runtime.js";
-import { captureSessionEntryMetadataRead } from "../config/sessions/session-entry-source-authority.js";
-import { captureIncognitoSessionBinding } from "../config/sessions/session-incognito-binding.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { LruCache } from "../infra/lru-cache.js";
-import { isIncognitoSessionKey } from "../routing/session-key.js";
 import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.js";
 import { prepareGitHubPublicationSessionLifecycle } from "../state/github-publication-session-lifecycles.js";
 import { captureOpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.js";
@@ -43,7 +43,6 @@ import { parseGitHubRemoteUrl } from "./github-remote.js";
 import { resolveSessionStoreIdentity } from "./session-store-key.js";
 import { findCanonicalStoreMatch } from "./session-utils-store-selection.js";
 import { loadGatewaySessionEntryReadOnlyInWorker } from "./session-utils-store-worker.js";
-import { loadIncognitoGatewaySessionEntryReadOnly } from "./session-utils.js";
 
 // Discovery only: publication resolves Git afresh. Registry/lifecycle guards retire facts early.
 const worktreeTargets = new LruCache<{ expiresAt: number; assertCurrent: () => void }>(256);
@@ -130,42 +129,6 @@ type PublicationSessionRead = Pick<
   "agentId" | "canonicalKey" | "storePath" | "entry"
 >;
 
-/** Process-owned sessions retain their existing synchronous metadata owner. */
-function readGitHubPublicationSession(
-  sessionKey: string,
-  options: { agentId?: string } = {},
-): PublicationSessionRead {
-  const memory = getSessionActorStorageBinding({ sessionKey, agentId: options?.agentId });
-  if (memory) {
-    return {
-      canonicalKey: sessionKey,
-      agentId: memory.agentId,
-      storePath: memory.path,
-      entry: memory.actor.snapshot(memory.authority)?.entry,
-    };
-  }
-  const binding = captureIncognitoSessionBinding({ sessionKey, agentId: options?.agentId });
-  if (!binding) {
-    if (isIncognitoSessionKey(sessionKey)) {
-      return loadIncognitoGatewaySessionEntryReadOnly(sessionKey, options);
-    }
-    throw new GitHubPublicationSessionChangedError();
-  }
-  const { actor } = binding;
-  const source = captureSessionEntryMetadataRead({
-    sessionKey,
-    agentId: actor.agentId,
-    storePath: actor.path,
-  });
-  const metadata = source?.readCurrent();
-  return {
-    canonicalKey: sessionKey,
-    agentId: actor.agentId,
-    storePath: actor.path,
-    entry: metadata,
-  };
-}
-
 /** The selected publication metadata is invalidated by the session writer's receipts. */
 export async function prepareGitHubPublicationSession(
   sessionKey: string,
@@ -193,11 +156,19 @@ export async function prepareGitHubPublicationSession(
   let retained: ReturnType<typeof retainPreparedSessionEntryPredicate> | undefined;
   let active = true;
   const scope = { sessionKey, agentId: options.agentId, storePath: options.target?.storePath };
-  let native = Boolean(
-    getSessionActorStorageBinding(scope) ||
-    captureIncognitoSessionBinding(scope) ||
-    isIncognitoSessionKey(sessionKey),
-  );
+  const assertCurrent = () => options.assertCurrent?.();
+  const memory = captureSessionActorStorageOwner(scope, {
+    assertCurrent,
+    authorize: assertCurrent,
+  });
+  const readMemory =
+    memory &&
+    (() => ({
+      canonicalKey: sessionKey,
+      agentId: memory.agentId,
+      storePath: memory.path,
+      entry: readCapturedSessionActorEntry(memory, sessionKey),
+    }));
   const retain = (
     databaseIdentity: string,
     key: string,
@@ -213,8 +184,8 @@ export async function prepareGitHubPublicationSession(
   };
   let loaded: PublicationSessionRead;
   try {
-    if (native) {
-      loaded = readGitHubPublicationSession(sessionKey, options);
+    if (readMemory) {
+      loaded = readMemory();
     } else if (options.target?.storePath && options.target.agentId) {
       const storePath = options.target.storePath;
       const agentId = options.target.agentId;
@@ -226,7 +197,6 @@ export async function prepareGitHubPublicationSession(
           if (!read.ok) {
             throw read.error;
           }
-          native = owner.kind === "native" || owner.kind === "incognito";
           if (typeof owner.source?.databaseIdentity === "string") {
             retain(`file:${owner.source.databaseIdentity}`, storedKey, read.value);
           }
@@ -267,8 +237,8 @@ export async function prepareGitHubPublicationSession(
       if (!active || (retained && !retained.isCurrent())) {
         throw new GitHubPublicationSessionChangedError();
       }
-      return native
-        ? readGitHubPublicationSession(sessionKey, options)
+      return readMemory
+        ? readMemory()
         : { ...loaded, entry: retained ? retained.readRetainedEntry() : loaded.entry };
     },
     release,

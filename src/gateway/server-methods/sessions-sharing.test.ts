@@ -16,7 +16,7 @@ import {
   patchSessionEntryCore,
   upsertSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
-import { listSessionMembers } from "../../config/sessions/session-sharing-store.js";
+import { readSessionMembersInWorker } from "../../config/sessions/session-sharing-store.js";
 import { addSessionMember } from "../../config/sessions/session-sharing-store.native.js";
 import * as sharingLifecycle from "../../sessions/session-lifecycle-admission.js";
 import {
@@ -786,7 +786,7 @@ describe("session sharing handlers", () => {
       expect(
         await call("session.members.add", { sessionKey, identityId: member.id }, requestContext),
       ).toEqual([[true, { ok: true, sessionKey, identityId: member.id }, undefined]]);
-      expect(listSessionMembers({ agentId: "main", sessionKey })).toEqual([
+      expect((await readSessionMembersInWorker({ agentId: "main", sessionKey })).members).toEqual([
         expect.objectContaining({
           identityId: member.id,
           addedBy: "actor-evidence:unattributed",
@@ -796,7 +796,9 @@ describe("session sharing handlers", () => {
       expect(
         await call("session.members.remove", { sessionKey, identityId: member.id }, requestContext),
       ).toEqual([[true, { ok: true, sessionKey, identityId: member.id }, undefined]]);
-      expect(listSessionMembers({ agentId: "main", sessionKey })).toEqual([]);
+      expect((await readSessionMembersInWorker({ agentId: "main", sessionKey })).members).toEqual(
+        [],
+      );
 
       expect(
         await loadTranscriptEvents({

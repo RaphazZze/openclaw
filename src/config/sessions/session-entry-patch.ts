@@ -5,6 +5,7 @@ import {
   SqliteWorkerError,
   hasSqliteWorkerOutcomeUnknown,
 } from "../../infra/sqlite-worker-contract.js";
+import type { DatabasePathIdentity } from "../../infra/sqlite-worker-identity.js";
 import type {
   SqliteWorkerOperationAdmission,
   SqliteWorkerAdmissionRequest,
@@ -49,6 +50,7 @@ import type { InternalSessionEntry as SessionEntry } from "./types.js";
 export async function patchSessionEntryInWorker(params: {
   database: OpenClawAgentDatabaseOptions & { path: string };
   databaseIdentity?: string;
+  expectedCreationIdentity?: DatabasePathIdentity;
   retainedExecution?: OpenClawAgentDatabaseExecution;
   agentId: string;
   selection: SessionEntryPatchSelection;
@@ -222,6 +224,7 @@ export async function runSessionEntryWorkerOperation<
 >(params: {
   database: OpenClawAgentDatabaseOptions & { path: string };
   databaseIdentity?: string;
+  expectedCreationIdentity?: DatabasePathIdentity;
   agentId: string;
   assertCurrent: () => void;
   assertPrepared?: () => void;
@@ -459,5 +462,7 @@ export async function runSessionEntryWorkerOperation<
     },
     params.nativeSettlement?.onAdmission,
     params.releaseSource,
+    "write",
+    params.expectedCreationIdentity,
   );
 }

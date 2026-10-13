@@ -9,7 +9,7 @@ import { resolveSessionPermissionCoreToolPolicy } from "../agents/session-permis
 import { resolveEffectiveToolFsWorkspaceOnly } from "../agents/tool-fs-policy.js";
 import { getRuntimeConfig } from "../config/io.js";
 import { readRetainedSessionEntryFacts } from "../config/sessions/session-entry-read-facts.js";
-import { captureIncognitoSessionSource } from "../config/sessions/session-incognito-binding.js";
+import { captureSessionEntryMetadataRead } from "../config/sessions/session-entry-source-authority.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { FsSafeError } from "../infra/fs-safe.js";
 import { getAgentScopedMediaLocalRoots, getDefaultMediaLocalRoots } from "../media/local-roots.js";
@@ -127,37 +127,22 @@ async function resolveAssistantMediaSessionPolicy(params: AssistantMediaPolicyPa
       return undefined;
     }
     const canonicalKey = normalizeSessionKeyPreservingOpaquePeerIds(params.sessionKey);
-    const source = captureIncognitoSessionSource({
-      sessionKey: canonicalKey,
-      agentId: owner.agentId,
-    });
+    const source = captureSessionEntryMetadataRead(
+      { sessionKey: canonicalKey, agentId: owner.agentId },
+      () => {
+        if (params.requestAuth?.hasCurrentClientAuthority?.() === false) {
+          throw new FsSafeError("path-mismatch", "Media access changed");
+        }
+      },
+    );
     if (source) {
-      if ("kind" in source) {
-        return undefined;
-      }
-      const media = source.actor.sessions.readMedia(canonicalKey);
-      if (!media) {
-        return undefined;
-      }
-      const claim = source.actor.sessions.captureCurrent(canonicalKey);
-      assertCurrent = () => {
-        source.admissionSignal?.throwIfAborted();
-        source.actor.assertReadable();
-        claim.assertCurrent();
-      };
-      assertCurrent();
-      readSession = () => {
-        assertCurrent?.();
-        const currentMedia = source.actor.sessions.readMedia(canonicalKey);
-        return {
-          cfg: getRuntimeConfig(),
-          agentId: owner.agentId,
-          canonicalKey,
-          entry: currentMedia
-            ? { ...currentMedia, ...source.actor.sessions.readSharing(canonicalKey)?.entry }
-            : undefined,
-        };
-      };
+      assertCurrent = source.assertCurrent;
+      readSession = () => ({
+        cfg: getRuntimeConfig(),
+        agentId: owner.agentId,
+        canonicalKey,
+        entry: source.readCurrent(),
+      });
       loaded = readSession();
     } else {
       const assertRoutingCurrent = captureSessionMutationRouting(getRuntimeConfig(), undefined, [

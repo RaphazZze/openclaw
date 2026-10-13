@@ -693,7 +693,6 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
         : authorization.withPreparedCurrent,
     },
     () => consuming.sharing!,
-    authorizedTargets,
   );
   return { error: null, authorization };
 }

@@ -8,10 +8,7 @@ import { captureSessionEntryMetadataRead } from "../../config/sessions/session-e
 import type { InternalSessionEntry } from "../../config/sessions/types.js";
 import { isIncognitoSessionKey } from "../../routing/session-key.js";
 import { registerOpenClawAgentDatabaseAsyncResource } from "../../state/openclaw-agent-db-resources.js";
-import {
-  type GatewaySessionEntryRead,
-  loadIncognitoGatewaySessionEntryReadOnly,
-} from "../session-utils-store.js";
+import type { GatewaySessionEntryRead } from "../session-utils-store.js";
 
 /** Source edits revoke the fork; a changed destination conservatively retains its repository. */
 export async function prepareRewindRepositoryEntries(
@@ -25,7 +22,7 @@ export async function prepareRewindRepositoryEntries(
     storePath: source.storePath,
   };
   const memory = getSessionActorStorageBinding(scope);
-  const metadata = captureSessionEntryMetadataRead(scope);
+  const metadata = captureSessionEntryMetadataRead(scope, assertCurrent);
   const memoryOwner = memory && captureSessionActorStorageOwner(memory);
   if (memory || metadata || isIncognitoSessionKey(source.canonicalKey)) {
     const read = (key: string) => {
@@ -35,10 +32,12 @@ export async function prepareRewindRepositoryEntries(
       if (metadata) {
         return key === source.canonicalKey
           ? metadata.readCurrent()
-          : captureSessionEntryMetadataRead({ ...scope, sessionKey: key })?.readCurrent();
+          : captureSessionEntryMetadataRead(
+              { ...scope, sessionKey: key },
+              assertCurrent,
+            )?.readCurrent();
       }
-      return loadIncognitoGatewaySessionEntryReadOnly(key, { agentId: source.agentId }, source.cfg)
-        .entry;
+      return undefined;
     };
     return {
       readSource: () => read(source.canonicalKey),
