@@ -48,6 +48,15 @@ describe("worker preparation identity", () => {
         runtimePreparation: { source: "empty", ...preparation },
       }),
     ).toThrow("runtime preparation identity is invalid");
+    expect(() =>
+      readWorkerPreparation({
+        runtimePreparation: {
+          source: "empty",
+          ...preparation,
+          recipe: { source: "none", inputs: {}, env: {} },
+        },
+      }),
+    ).toThrow("runtime preparation identity is invalid");
   });
 
   it("shares identity across linked source paths, JSON field order and plugin order", () => {
@@ -78,6 +87,31 @@ describe("worker preparation identity", () => {
     expect(readWorkerProjectPreparation({ preparation: skipped })).toEqual(skipped);
   });
 
+  it("uses the provider disk fingerprint independently of lease and runtime policy", () => {
+    const target = { ...input.target, profileKey: "7".repeat(64) };
+    const original = createWorkerPreparationIdentity({ ...input, target });
+    const changed = createWorkerPreparationIdentity({
+      ...input,
+      target,
+      profileId: "renamed",
+      profileSnapshot: {
+        install: "npm",
+        executionMode: "remote-exec",
+        suspendAfter: "45m",
+        readyWorkers: 0,
+        settings: { ttl: "4h", idleTimeout: "2h", binary: "/other/crabbox", warmImage: true },
+      },
+    });
+    expect(changed.cacheKey).toBe(original.cacheKey);
+    expect(changed.key).not.toBe(original.key);
+    expect(
+      createWorkerPreparationIdentity({
+        ...input,
+        target: { ...target, profileKey: "8".repeat(64) },
+      }).cacheKey,
+    ).not.toBe(original.cacheKey);
+  });
+
   it.each<[string, Partial<typeof input>]>([
     ["namespace", { namespace: "gateway-two" }],
     ["provider", { providerId: "another-provider" }],
@@ -88,9 +122,13 @@ describe("worker preparation identity", () => {
       "profile",
       { profileSnapshot: { ...input.profileSnapshot, settings: { region: "elsewhere" } } },
     ],
+    ["project", { project: { ...input.project, key: "9".repeat(64) } }],
+    ["class", { target: { ...input.target, machineClass: "large" } }],
     ["target", { target: { ...input.target, arch: "arm64" } }],
     ["OS", { target: { ...input.target, platform: "darwin" } }],
     ["mode", { profileSnapshot: { ...input.profileSnapshot, executionMode: "remote-exec" } }],
+    ["version", { artifacts: { ...input.artifacts, openclawVersion: "2026.9.1" } }],
+    ["archive", { artifacts: { ...input.artifacts, workerArchiveSha256: "6".repeat(64) } }],
     ["runtime", { artifacts: { ...input.artifacts, nodeBootstrapSha256: "3".repeat(64) } }],
     [
       "plugins",
@@ -116,17 +154,29 @@ describe("worker preparation identity", () => {
     const next = createWorkerPreparationIdentity({ ...input, ...change });
     expect(next.key).not.toBe(original.key);
     expect(next.cacheKey).toMatch(/^[a-f0-9]{64}$/u);
-    if (label === "commit") {
+    if (
+      [
+        "profile id",
+        "commit",
+        "mode",
+        "runtime",
+        "plugins",
+        "bundle",
+        "protocol",
+        "version",
+        "archive",
+      ].includes(label)
+    ) {
       expect(next.cacheKey).toBe(original.cacheKey);
     } else {
       expect(next.cacheKey).not.toBe(original.cacheKey);
-      const { project: _project, setupRecipe: _setupRecipe, ...runtime } = input;
-      const { project: _changedProject, setupRecipe: _changedRecipe, ...runtimeChange } = change;
-      if (label !== "recipe") {
-        expect(createWorkerPreparationIdentity({ ...runtime, ...runtimeChange }).key).not.toBe(
-          createWorkerPreparationIdentity(runtime).key,
-        );
-      }
+    }
+    const { project: _project, setupRecipe: _setupRecipe, ...runtime } = input;
+    const { project: _changedProject, setupRecipe: _changedRecipe, ...runtimeChange } = change;
+    if (!["recipe", "commit", "project"].includes(label)) {
+      expect(createWorkerPreparationIdentity({ ...runtime, ...runtimeChange }).key).not.toBe(
+        createWorkerPreparationIdentity(runtime).key,
+      );
     }
   });
 });

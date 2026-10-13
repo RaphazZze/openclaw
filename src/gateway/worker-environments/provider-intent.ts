@@ -16,7 +16,10 @@ import {
   readWorkerProjectPreparation,
   type WorkerProviderPreparedIntent,
 } from "./preparation-identity.js";
-import { readWorkerProjectSetupRecipe, readWorkerProjectSnapshot } from "./project-preparation.js";
+import {
+  readWorkerProjectEnvironmentRecipe,
+  readWorkerProjectSnapshot,
+} from "./project-preparation.js";
 import type { WorkerProviderLifecycleOptions } from "./provider-lifecycle.types.js";
 import { prepareRepositoryWorkerProjectSource } from "./repository-project-admission.js";
 import type { RepositoryWorkerProjectSnapshot } from "./repository-project-source.schema.js";
@@ -126,7 +129,10 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
     if (inherited) {
       providerId = normalizeCapabilityProviderId(inherited.providerId) ?? inherited.providerId;
       if (providerId !== inherited.providerId) {
-        throw serviceError("invalid_profile", "Inherited worker provider id is not canonical");
+        throw serviceError(
+          "invalid_profile",
+          "Inherited worker provider ID is not in the expected format",
+        );
       }
       requireInheritedWorkerProfileAuthorization(
         normalizedProfileId,
@@ -223,9 +229,14 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
                 cached &&
                 "source" in cached &&
                 preparation &&
+                preparation.recipe &&
                 isDeepStrictEqual(cached, admittedProject)
               ) {
-                return { project: cached, setupRecipe: preparation.setupRecipe };
+                return {
+                  project: cached,
+                  setupRecipe: preparation.setupRecipe,
+                  recipe: preparation.recipe,
+                };
               }
             }
             return undefined;
@@ -246,12 +257,13 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
       signal?.throwIfAborted();
       if (project !== undefined) {
         const target = provider.resolvePreparationTarget?.(profile, machineClass, os);
-        const setupRecipe =
+        const recipe =
           target && project
             ? "source" in project
-              ? repositoryAdmission?.setupRecipe
-              : await readWorkerProjectSetupRecipe(project, signal)
+              ? repositoryAdmission?.recipe
+              : await readWorkerProjectEnvironmentRecipe(project, signal)
             : undefined;
+        const setupRecipe = recipe?.identity;
         signal?.throwIfAborted();
         // An executable recipe does not authorize itself. Non-admin callers retain
         // ordinary checkout preparation without executing it or filling a reserve.
@@ -274,6 +286,7 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
             target,
             artifacts: prepared.artifacts,
             setupRecipe,
+            recipe,
             runSetupScript: createOptions.runSetupScript,
           });
           profileSnapshot = project
@@ -421,6 +434,7 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
       target,
       artifacts: prepared.artifacts,
       setupRecipe: preparation.setupRecipe,
+      recipe: preparation.recipe,
       runSetupScript: preparation.runSetupScript,
     });
     return isDeepStrictEqual(project ? observed : { source: "empty", ...observed }, preparation)

@@ -129,6 +129,7 @@ describe("worker provider project preparation ownership", () => {
                   homeDir: `${directory}/home`,
                   sourceManifestRef: `sha256:${"a".repeat(64)}`,
                   preparedManifestRef: `sha256:${"b".repeat(64)}`,
+                  recipePreparation: { source: "none", phaseDurationsMs: {} },
                 }),
             });
           }
