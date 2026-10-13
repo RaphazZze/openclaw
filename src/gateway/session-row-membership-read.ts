@@ -319,21 +319,39 @@ export function createSessionRowEntryReadAccess(
             await prepareCombinedSessionStoreForGatewayAsync(cfg, options, [
               ...new Set([...listAgentIds(cfg), ...[...rows.values()].map((row) => row.agentId)]),
             ]);
-          // Pin every physical source before the first worker request yields.
+          // Pin sources and resident entries before a worker wait can invalidate their rows.
           const captures = preparedStore.reads.flatMap(({ storeTarget: physical }) => {
             const file = readDatabasePathIdentitySync(physical.storePath);
             if (!file.key.startsWith("file:")) {
               return [];
             }
             const identity = file.key.slice("file:".length);
+            const previous = findStoreGeneration(stores, physical.storePath, {
+              identity,
+              birthtime: file.birthtime,
+            });
+            let entries: SessionEntrySummary[] | undefined;
+            if (previous) {
+              entries = [];
+              for (const id of byStore.get(previous.target.storePath) ?? []) {
+                const row = rows.get(id);
+                const entry =
+                  row?.storedEntry ??
+                  row?.pendingDatabaseFacts?.entry ??
+                  row?.retainedDatabaseFacts?.entry;
+                if (!row || !entry) {
+                  entries = undefined;
+                  break;
+                }
+                entries.push({ sessionKey: row.key, entry });
+              }
+            }
             return [
               {
                 target: physical,
                 file,
-                previous: findStoreGeneration(stores, physical.storePath, {
-                  identity,
-                  birthtime: file.birthtime,
-                }),
+                previous: entries ? previous : undefined,
+                entries,
               },
             ];
           });
@@ -346,7 +364,10 @@ export function createSessionRowEntryReadAccess(
             })),
             async (owners) => {
               const entries = new Map<string, SessionEntrySummary[]>();
-              for (const [index, { target, file, previous }] of captures.entries()) {
+              for (const [
+                index,
+                { target, file, previous, entries: capturedEntries },
+              ] of captures.entries()) {
                 const prepared = previous
                   ? undefined
                   : await owners[index]!.readStoreProjection({
@@ -368,6 +389,8 @@ export function createSessionRowEntryReadAccess(
                 if (prepared) {
                   replaced.add(target.storePath);
                   entries.set(target.storePath, prepared.entries);
+                } else if (capturedEntries) {
+                  entries.set(target.storePath, capturedEntries);
                 }
               }
               // Reject replaced sources before publishing their rows and sharing metadata.
@@ -375,19 +398,8 @@ export function createSessionRowEntryReadAccess(
                 owners[index]!.assertCurrent();
                 assertExistingDatabaseIdentity(target.storePath, file.key, file.birthtime);
               }
-              const readEntries = (target: SessionStoreTarget) => {
-                const previous = captures.find(
-                  (capture) => capture.target.storePath === target.storePath,
-                )?.previous;
-                if (previous) {
-                  return [...(byStore.get(previous.target.storePath) ?? [])].flatMap((id) => {
-                    const row = rows.get(id);
-                    const entry = row && (row.storedEntry ?? readSessionRowEntry(row));
-                    return row && entry ? [{ sessionKey: row.key, entry }] : [];
-                  });
-                }
-                return entries.get(target.storePath) ?? [];
-              };
+              const readEntries = (target: SessionStoreTarget) =>
+                entries.get(target.storePath) ?? [];
               const lineage = await prepareCombinedSessionStoreLineage(
                 cfg,
                 preparedStore,

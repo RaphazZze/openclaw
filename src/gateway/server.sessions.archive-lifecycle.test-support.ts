@@ -188,6 +188,7 @@ export function placementReader(current: () => WorkerSessionPlacementRecord | un
   return {
     async prepareSessionPlacement(sessionId: string) {
       return {
+        prepareRead: () => undefined,
         current: () => {
           const placement = current();
           return placement?.sessionId === sessionId ? placement : undefined;
