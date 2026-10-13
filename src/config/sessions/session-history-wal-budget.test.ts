@@ -432,6 +432,93 @@ it.each(["transaction", "iterator"] as const)(
   },
 );
 
+it("retries retained WAL after a complete passive checkpoint and reader release on the budget cadence", async () => {
+  state = await createOpenClawTestState({ layout: "state-only", scenario: "empty" });
+  const options = { agentId: "main", env: state.env };
+  const database = openOpenClawAgentDatabase(options);
+  ensureSessionTranscriptArchiveSchema(database.db);
+  database.db.exec("PRAGMA wal_autocheckpoint=0");
+  expect(database.walMaintenance.checkpoint()).toBe(true);
+  const storePath = path.join(state.sessionsDir(), "sessions.json");
+  const payload = Buffer.alloc(512 * 1024, 65);
+  database.db
+    .prepare(
+      "INSERT INTO cache_entries(scope,key,blob,updated_at) VALUES ('wal-proof','traffic',?,1)",
+    )
+    .run(payload);
+  const reader = openNodeSqliteDatabase(database.path, { readOnly: true });
+  reader.exec("BEGIN");
+  expect(
+    reader.prepare("SELECT blob FROM cache_entries WHERE scope='wal-proof'").get()?.blob,
+  ).toEqual(new Uint8Array(payload));
+  const diagnostics: SqliteSessionArchivePruningDiagnostics[] = [];
+  const observePruning = archivePruningDiagnostics.observeSessionArchivePruning;
+  vi.spyOn(archivePruningDiagnostics, "observeSessionArchivePruning").mockImplementation(
+    async <T>(...args: Parameters<typeof observePruning<T>>) => {
+      const result = await observePruning(...args);
+      diagnostics.push(structuredClone(args[0]));
+      return result;
+    },
+  );
+  const maintenance = resolveMaintenanceConfigFromInput({
+    mode: "enforce",
+    maxDiskBytes: 1,
+    highWaterBytes: 1,
+  });
+  const params = { ...options, storePath, mode: "enforce" as const, maintenance };
+  try {
+    await enforceSqliteSessionHistoryDiskBudget(params);
+    await expect(enforceSqliteSessionHistoryDiskBudget(params)).resolves.toMatchObject({
+      freedBytes: 0,
+      removedEntries: 0,
+      removedFiles: 0,
+    });
+    expect(diagnostics.at(-1)).toMatchObject({
+      checkpointCalls: 2,
+      checkpointIncomplete: 0,
+      checkpoint: { state: "complete" },
+    });
+    expect(database.db.prepare("PRAGMA freelist_count").get()?.freelist_count).toBe(0);
+    const before = await measureSessionPhysicalDiskUsage(storePath);
+    expect(before.databaseWalBytes).toBeGreaterThan(0);
+    reader.exec("ROLLBACK");
+    expect((await measureSessionPhysicalDiskUsage(storePath)).databaseWalBytes).toBe(
+      before.databaseWalBytes,
+    );
+    await expect(inspectSqliteSessionHistoryDiskBudget(params)).resolves.toMatchObject({
+      wouldMutate: false,
+    });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    await withSessionHistoryBudgetSweepsForTest(async () => {
+      kickSessionHistoryDiskBudgetMaintenance({
+        ...options,
+        storePath,
+        maintenanceConfig: maintenance,
+      });
+    });
+    expect((await measureSessionPhysicalDiskUsage(storePath)).databaseWalBytes).toBe(
+      before.databaseWalBytes,
+    );
+    clock.mockReturnValue(now + 31 * 60_000);
+    await withSessionHistoryBudgetSweepsForTest(async () => {
+      kickSessionHistoryDiskBudgetMaintenance({
+        ...options,
+        storePath,
+        maintenanceConfig: maintenance,
+      });
+    });
+    const after = await measureSessionPhysicalDiskUsage(storePath);
+    expect(after.databaseWalBytes).toBe(0);
+    expect(after.totalBytes).toBeLessThan(before.totalBytes);
+    expect(
+      database.db.prepare("SELECT blob FROM cache_entries WHERE scope='wal-proof'").get()?.blob,
+    ).toEqual(new Uint8Array(payload));
+  } finally {
+    reader.close();
+  }
+});
+
 it("coalesces forced kicks during and after a sweep until the one-minute interval expires", async () => {
   state = await createOpenClawTestState({ layout: "state-only", scenario: "empty" });
   const tempDir = state.sessionsDir();

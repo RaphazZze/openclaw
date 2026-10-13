@@ -222,6 +222,39 @@ it.each(["unlock", "insert", "policy"] as const)(
   },
 );
 
+it("caps eligible entries when protected inserts overflow a previously below-cap store", async ({
+  signal,
+}) => {
+  const { request, scope, storePath, updatedAt } = createStore(86_400_000);
+  request.maintenanceConfig.maxEntries = 2;
+  const victimKey = "agent:main:eligible-before-overflow";
+  runOpenClawAgentWriteTransaction((owner) => {
+    writeSessionEntry(owner, sessionKey, {
+      sessionId: "age-kick",
+      updatedAt,
+      modelSelectionLocked: true,
+    });
+    writeSessionEntry(owner, victimKey, { sessionId: "eligible-before-overflow", updatedAt });
+  }, scope);
+  const settled = observeNextPeriodicMaintenance();
+  kickSessionEntryMaintenanceAfterWrite(request);
+  await settled(signal);
+  expect(loadSessionEntry({ sessionKey: victimKey, storePath })?.archivedAt).toBeUndefined();
+  runOpenClawAgentWriteTransaction((owner) => {
+    writeSessionEntry(owner, "agent:main:protected-overflow", {
+      sessionId: "protected-overflow",
+      updatedAt,
+      modelSelectionLocked: true,
+    });
+  }, scope);
+  kickSessionEntryMaintenanceAfterWrite(request);
+  await yieldToEventLoop();
+  await vi.advanceTimersByTimeAsync(1_001);
+  expect(loadSessionEntry({ sessionKey: victimKey, storePath })?.archiveReason).toBe(
+    "active-session-cap",
+  );
+});
+
 it("resumes an over-cap pass on ordinary activity after runtime protection releases", async ({
   signal,
 }) => {

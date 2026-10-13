@@ -144,10 +144,7 @@ async function inspectSessionHistoryDiskBudget(
   const pruning = await readSqliteSessionArchivePruning(databaseOptions);
   if (
     (pruning?.archives.length ?? 0) > 0 ||
-    (physicalReclamation &&
-      ((pruning?.freePages ?? 0) > 0 ||
-        usage.databaseWalBytes !==
-          getBudgetKickState(params.storePath, params.maintenance).protectedWalBytes)) ||
+    (physicalReclamation && ((pruning?.freePages ?? 0) > 0 || usage.databaseWalBytes > 0)) ||
     (await hasRetainedSessionTranscriptArchives(params.storePath))
   ) {
     return { diskBudget, wouldMutate: true };
@@ -359,8 +356,8 @@ async function runSessionHistoryDiskBudgetMaintenance(
     fn: async () => {
       try {
         if (automatic && getBudgetKickState(params.storePath, params.maintenance).protected) {
-          // The throttled reader probe notices released work and expired recent
-          // protection without another futile checkpoint or writer reservation.
+          // Released readers can allow truncation without changing WAL length;
+          // the throttled probe retries retained WAL as well as newly eligible data.
           const preview = await inspectSessionHistoryDiskBudget(params, true);
           if (!preview.wouldMutate) {
             recordPhysicalBudgetOutcome(params, preview.diskBudget);

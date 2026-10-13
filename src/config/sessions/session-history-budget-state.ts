@@ -80,7 +80,6 @@ type BudgetKickState = {
   pendingForce?: SessionHistoryBudgetKick;
   blockedUntil?: number;
   protected?: boolean;
-  protectedWalBytes?: number;
   checkpointGate?: SessionHistoryCheckpointGate;
   checkpointBlocked?: {
     checkpoint?: SqliteWalCheckpointSnapshot;
@@ -200,7 +199,6 @@ export function recordPhysicalBudgetOutcome(
   state.blockedUntil = Date.now() + PHYSICAL_BUDGET_CHECK_INTERVAL_MS;
   state.protected =
     result.removedEntries === 0 && result.removedFiles === 0 && result.freedBytes === 0;
-  state.protectedWalBytes = state.protected ? result.walBytesAfter : undefined;
   if (!alreadyBlocked) {
     log.warn(
       "session history disk budget remains exceeded after cleanup; retained data is protected or could not be reclaimed. Raise session.maintenance.maxDiskBytes or export and delete unneeded sessions; automatic checks resume on activity after 30 minutes",
