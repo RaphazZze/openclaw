@@ -682,7 +682,6 @@ export async function prepareSessionMutationFacts(
           : new SessionMutationFactsUnavailableError({ cause: error });
       }
     };
-    readCurrent(params.cfg);
     const bindCreation = (operation: SessionEntryCreationOperation) => {
       // Existing rows already follow write receipts; only absence needs a creation transition.
       if (facts?.target === null) {
@@ -697,6 +696,7 @@ export async function prepareSessionMutationFacts(
       const pending = [...acquiringReads.values()].flatMap((read) => read.prepareRead() ?? []);
       return pending.length > 0 ? Promise.all(pending).then(() => {}) : undefined;
     };
+    await prepareRead();
     return { storageTarget, bindCreation, prepareRead, readCurrent, release, followRegistration };
   } catch (error) {
     release();
