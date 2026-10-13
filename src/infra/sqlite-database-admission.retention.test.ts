@@ -448,9 +448,10 @@ it.each([false, true])(
       expect(closedBeforeExit).toBeTypeOf("string");
       expect(unrelatedBeforeExit).toBeTypeOf("string");
       await worker.terminate();
+      // An unclean exit cannot certify settled receipts, even for already-closed handles.
       expect(readSqliteDatabaseWriteTokenForPath(location)).not.toBe(beforeExit);
-      expect(readSqliteDatabaseWriteTokenForPath(closedLocation)).toBe(closedBeforeExit);
-      expect(readSqliteDatabaseWriteTokenForPath(unrelatedLocation)).toBe(unrelatedBeforeExit);
+      expect(readSqliteDatabaseWriteTokenForPath(closedLocation)).not.toBe(closedBeforeExit);
+      expect(readSqliteDatabaseWriteTokenForPath(unrelatedLocation)).not.toBe(unrelatedBeforeExit);
       const inherited = readSqliteDatabaseAdmissions(
         getEnvironmentData(SQLITE_DATABASE_ADMISSIONS_KEY),
       )?.find((record) => record.location === location);

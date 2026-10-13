@@ -169,6 +169,47 @@ describe("prepared model runtime owner selection", () => {
     }
   });
 
+  it("finishes config replacement after a second adopted auth mutation", async () => {
+    mocks.configuredAgentIds = ["default"];
+    const config = {};
+    const nextConfig = { messages: { responsePrefix: "updated" } };
+    await refreshPreparedModelRuntimeSnapshots(config, { gatewayLifecycle: true });
+    const input = fixture.agentInput("default", config);
+    const configWrite = holdNextCatalogWrite();
+    const authWrite = holdNextCatalogWrite();
+    const replacement = refreshPreparedModelRuntimeSnapshots(nextConfig, {
+      gatewayLifecycle: true,
+    });
+    const result = expect(replacement).resolves.toBeUndefined();
+    void result.catch(() => undefined);
+    let reader: ReturnType<typeof prepareModelRuntimeSnapshot> | undefined;
+    try {
+      await configWrite.started.promise;
+      mocks.authStorage.getAll.mockReturnValue({
+        custom: { type: "api_key", key: "first-update" },
+      });
+      mocks.mutationListener?.({ agentDir: input.agentDir, affectsInheritedStores: false });
+      configWrite.release.resolve();
+      await authWrite.started.promise;
+      reader = prepareModelRuntimeSnapshot(input);
+      void reader.catch(() => undefined);
+      const credentials = { custom: { type: "api_key" as const, key: "latest-update" } };
+      mocks.authStorage.getAll.mockReturnValue(credentials);
+      mocks.mutationListener?.({ agentDir: input.agentDir, affectsInheritedStores: false });
+      authWrite.release.resolve();
+
+      await result;
+      await expect(reader).resolves.toMatchObject({ config: nextConfig });
+      const snapshot = await reader;
+      expect(snapshot.isCurrent()).toBe(true);
+      expect(snapshot.createStores().authStorage.getAll()).toEqual(credentials);
+    } finally {
+      configWrite.release.resolve();
+      authWrite.release.resolve();
+      await Promise.allSettled([reader, replacement]);
+    }
+  });
+
   it("joins a scoped successor only after both configured agents are current", async () => {
     mocks.configuredAgentIds = ["agent-a", "agent-b"];
     const config = { agents: { defaults: { model: "openai/gpt-5.5" } } };
