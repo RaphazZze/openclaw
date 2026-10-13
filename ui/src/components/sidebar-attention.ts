@@ -56,10 +56,26 @@ class SidebarAttention extends OpenClawLightDomElement {
   private panelGeneration = 0;
 
   private readonly subscriptions = new SubscriptionsController(this)
-    .watchStore(() => this.context?.sidebarAttention)
-    .watchStore(() => this.context?.sessions)
-    .watchStore(() => this.context?.agents)
-    .watchStore(() => this.context?.agentIdentity);
+    .watch(
+      () => this.context?.sidebarAttention,
+      (store, notify) => {
+        const presentation = () => [
+          this.context?.gateway.snapshot.phase === "connected" || store.entries.length > 0,
+          sidebarInboxTabCounts(store.entries).all,
+        ];
+        let previous = presentation();
+        return store.subscribe(() => {
+          const next = presentation();
+          if (this.panelOpen || next.some((value, index) => value !== previous[index])) {
+            previous = next;
+            notify();
+          }
+        });
+      },
+    )
+    .watchStore(() => (this.panelOpen ? this.context?.sessions : undefined))
+    .watchStore(() => (this.panelOpen ? this.context?.agents : undefined))
+    .watchStore(() => (this.panelOpen ? this.context?.agentIdentity : undefined));
 
   override connectedCallback() {
     super.connectedCallback();

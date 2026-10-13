@@ -89,6 +89,14 @@ export abstract class AppSidebarBase extends OpenClawLightDomContentsElement {
     return this.sidebarSnapshot?.involvingMe ?? this.sessionOwnerFilter.involvingMe;
   }
 
+  get sessionCatalogRowsVisible(): boolean {
+    return (
+      this.navigationView === "sessions" &&
+      this.sidebarAgentsMode === "chip" &&
+      !this.contextualSidebar
+    );
+  }
+
   abstract readonly sessionOwnerFilter: SessionOwnerFilterController;
 
   setSessionOwnerFilter = (ownerId: string | null, involvingMe = false) => {

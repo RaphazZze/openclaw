@@ -78,6 +78,7 @@ type SidebarAttentionElement = HTMLElement & {
   context: ApplicationContext;
   updateComplete: Promise<boolean>;
   dismissPanel: () => boolean;
+  render: () => unknown;
   onNavigate?: ApplicationContext["navigate"];
 };
 
@@ -214,6 +215,19 @@ describe("sidebar attention refresh ownership", () => {
     const trigger = element.querySelector<HTMLButtonElement>(".sidebar-issues-button")!;
     return { element, provider, store, trigger };
   }
+
+  it("leaves the closed Inbox idle when publications do not change its button", async () => {
+    const harness = createGatewayHarness(mockClient(async () => ({})));
+    const { element } = await mountAttention({ gateway: harness.gateway });
+    await element.updateComplete;
+    const render = vi.spyOn(element, "render");
+
+    harness.update({ lastError: "Unrelated connection diagnostic" });
+    await element.updateComplete;
+
+    expect(render).not.toHaveBeenCalled();
+    expect(element.querySelector(".sidebar-issues-button__count")).toBeNull();
+  });
 
   it("keeps the plain attention panel inside its top-layer menu surface", async () => {
     const { element, trigger } = await mountAttention();

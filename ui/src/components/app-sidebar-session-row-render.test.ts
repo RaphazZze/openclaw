@@ -129,6 +129,10 @@ it("renders the saved chip identity before agent discovery without reviving anot
     "Harbor",
   );
   expect(card!.querySelector("[data-avatar='⚓']")).not.toBeNull();
+  const update = vi.spyOn(card!, "performUpdate");
+  render(renderSidebarAgentCard(host), container);
+  await card!.updateComplete;
+  expect(update).not.toHaveBeenCalled();
   host.sessionKey = "agent:other:thread";
   render(renderSidebarAgentCard(host), container);
   expect(container.querySelector("openclaw-sidebar-agent-card")).toBeNull();

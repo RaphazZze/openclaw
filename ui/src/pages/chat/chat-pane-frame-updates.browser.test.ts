@@ -38,7 +38,7 @@ async function mountPane(presented = true) {
   });
   // Use the existing lifecycle harness, with a small render to isolate cadence.
   Object.assign(pane, {
-    render: () => html`<span>${pane.presentationTitle}</span><span>${pane.paneId}</span>`,
+    render: () => html`<span>${pane.paneLabel}</span><span>${pane.paneId}</span>`,
     presentedChanged: () => {},
   });
   pane.presented = presented;
@@ -67,7 +67,7 @@ it.each([false, true])(
     pane.presented = false;
     for (let index = 0; index < 6; index++) {
       await task(() => {
-        pane.presentationTitle = `hidden revision ${index}`;
+        pane.paneLabel = `hidden revision ${index}`;
         pane.paneId = `parked-pane-${index}`;
         pane.requestUpdate();
       });
@@ -100,7 +100,7 @@ it.each(["request", "property", "state"] as const)(
     const lifecycle = pane.chatState.createRenderLifecycle();
     await task(() => {
       if (trigger === "property") {
-        pane.presentationTitle = "immediate property";
+        pane.paneLabel = "immediate property";
       } else if (trigger === "state") {
         lifecycle.invalidate();
       } else {

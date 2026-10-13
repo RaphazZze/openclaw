@@ -7,8 +7,6 @@ import type { ApplicationContext } from "../../app/context.ts";
 import { readDeletedSessionStartup } from "../../app/deleted-session-startup.ts";
 import { t } from "../../i18n/index.ts";
 import type { BoardFace } from "../../lib/board/settings.ts";
-import { resolveSessionDisplayName } from "../../lib/session-display.ts";
-import { resolveSessionKey } from "../../lib/sessions/index.ts";
 import {
   areUiSessionKeysEquivalent,
   parseAgentSessionKey,
@@ -86,7 +84,6 @@ export function chatPagePaneOwnerKeys(
 }
 
 export function renderChatPagePaneCell(options: ChatPagePaneRenderOptions) {
-  const sessions = options.context?.sessions?.presentation.result?.sessions ?? [];
   return html`
     <div
       class="chat-split-view__cell ${
@@ -130,14 +127,6 @@ export function renderChatPagePaneCell(options: ChatPagePaneRenderOptions) {
               : undefined;
           const draft = active
             ? routeDraft(options.data, options.consumedDraftData, sessionKey)
-            : undefined;
-          const resolvedKey =
-            resolveSessionKey(sessionKey, options.context?.gateway?.snapshot?.hello) || sessionKey;
-          const presentationRow = sessions.find((row) =>
-            areUiSessionKeysEquivalent(row.key, resolvedKey),
-          );
-          const presentationTitle = presentationRow
-            ? resolveSessionDisplayName(resolvedKey, presentationRow)
             : undefined;
           if (
             options.context &&
@@ -195,7 +184,6 @@ export function renderChatPagePaneCell(options: ChatPagePaneRenderOptions) {
               )}
               .dashboardExpanded=${routeData ? routeData.dashboardExpanded === true : noChange}
               .routeFace=${routeData ? (routeData.face ?? "chat") : noChange}
-              .presentationTitle=${presentationTitle}
               .narrow=${options.narrow}
               .mergedChrome=${options.mergedChrome && active}
               .navDrawerOpen=${options.navDrawerOpen && active}

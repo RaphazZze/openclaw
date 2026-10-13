@@ -107,10 +107,9 @@ export function renderSidebarAgentCard(host: AppSidebarRenderHost) {
         .menuOpen=${host.sidebarMenus.agentMenuPosition !== null}
         .menuUnread=${menuUnread}
         .switcherAvailable=${cardAgents.length > 1}
-        .onToggleMenu=${(trigger: HTMLElement) => host.sidebarMenus.toggleAgentMenu(trigger)}
-        .onMenuPointerMove=${(trigger: HTMLElement, event: PointerEvent) =>
-          host.sidebarMenus.scheduleAgentMenuHoverOpen(trigger, event)}
-        .onMenuPointerLeave=${() => host.sidebarMenus.handleAgentMenuTriggerPointerLeave()}
+        .onToggleMenu=${host.sidebarMenus.toggleAgentMenu}
+        .onMenuPointerMove=${host.sidebarMenus.scheduleAgentMenuHoverOpen}
+        .onMenuPointerLeave=${host.sidebarMenus.handleAgentMenuTriggerPointerLeave}
         @contextmenu=${(event: MouseEvent) => {
           event.preventDefault();
           if (host.sidebarMenus.agentMenuPosition !== null) {
