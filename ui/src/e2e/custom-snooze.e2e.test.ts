@@ -91,7 +91,9 @@ suite.define(() => {
           await field.press("Enter");
           await picker.getByRole("alert").waitFor();
           expect(
-            (await gateway.getRequests("sessions.patch")).filter((r) => r.params?.snoozedUntil),
+            (await gateway.getRequests("sessions.patch")).filter(
+              (r) => r.params && typeof r.params === "object" && "snoozedUntil" in r.params,
+            ),
           ).toHaveLength(0);
           await field.press("Escape");
           await picker.waitFor({ state: "hidden" });

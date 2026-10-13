@@ -56,7 +56,7 @@ export function SessionSnoozeOptions(props: {
       const controls = Array.from(
         popover.overlay.surface.querySelectorAll<HTMLElement>("input, button:not(:disabled)"),
       );
-      const index = controls.indexOf(document.activeElement as HTMLElement);
+      const index = controls.findIndex((control) => control === document.activeElement);
       const next = (index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
       event.preventDefault();
       event.stopPropagation();

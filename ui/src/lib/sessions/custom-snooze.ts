@@ -15,18 +15,22 @@ export function customSnoozeStorageKey(gatewayUrl: string, accountScope: string)
 }
 
 function validChoice(value: unknown, now: number): value is CustomSnooze {
-  if (!value || typeof value !== "object") {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("selectedAt" in value) ||
+    !("snoozedUntil" in value)
+  ) {
     return false;
   }
-  const choice = value as Partial<CustomSnooze>;
   return (
-    typeof choice.selectedAt === "number" &&
-    Number.isFinite(choice.selectedAt) &&
-    choice.selectedAt <= now &&
-    now - choice.selectedAt < lifetimeMs &&
-    typeof choice.snoozedUntil === "number" &&
-    choice.snoozedUntil > now &&
-    Number.isFinite(new Date(choice.snoozedUntil).getTime())
+    typeof value.selectedAt === "number" &&
+    Number.isFinite(value.selectedAt) &&
+    value.selectedAt <= now &&
+    now - value.selectedAt < lifetimeMs &&
+    typeof value.snoozedUntil === "number" &&
+    value.snoozedUntil > now &&
+    Number.isFinite(new Date(value.snoozedUntil).getTime())
   );
 }
 
