@@ -637,7 +637,6 @@ test.each(["idle", "active"] as const)(
       );
       expect(closesAtDrain).toBe(0);
       expect(nativeClosesAtDrain).toBe(0);
-      expect(loadSessionEntryReadOnly(fixture.scopes[1]!)).toBeUndefined();
     } else {
       markGatewayRestartDraining("restart (SIGTERM)");
     }
@@ -651,6 +650,9 @@ test.each(["idle", "active"] as const)(
       readOpenClawAgentIntegrityVerification(fixture.database.path, fixture.options.env)
         ?.clean_close,
     ).toBe(1);
+    if (timing === "active") {
+      expect(loadSessionEntryReadOnly(fixture.scopes[1]!)).toBeUndefined();
+    }
     resetGatewayWorkAdmission();
     await expect(runSqliteSessionReclamation({ plan: fixture.plans[2]! })).resolves.toMatchObject({
       kind: "lifecycle-artifacts",
