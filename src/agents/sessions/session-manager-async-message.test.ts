@@ -1,10 +1,16 @@
 import path from "node:path";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { expectDefined } from "@openclaw/normalization-core/expect";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { awaitGateBeforeSettlement, createDeferred } from "../../../test/helpers/promise.js";
+import {
+  awaitGateBeforeSettlement,
+  createDeferred,
+  withinTest,
+} from "../../../test/helpers/promise.js";
 import { makeUserMessage } from "../../../test/helpers/user-message.js";
 import {
   appendTranscriptMessageSync,
+  loadSessionEntry,
   loadTranscriptEvents,
   upsertSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
@@ -14,15 +20,23 @@ import {
   withSessionPendingInputPersistence,
 } from "../../config/sessions/session-accessor.pending-inputs.js";
 import { loadSessionEntryForAdmission } from "../../config/sessions/session-accessor.sqlite-entry-admission.js";
+import { writeSessionEntry } from "../../config/sessions/session-accessor.sqlite-entry-store.js";
+import { kickSessionEntryMaintenanceAfterWrite } from "../../config/sessions/session-accessor.sqlite-maintenance-kick.js";
 import { readTranscriptEventRows } from "../../config/sessions/session-accessor.sqlite-read.js";
+import * as reclamationRun from "../../config/sessions/session-accessor.sqlite-reclamation-run.js";
 import type { SessionActor } from "../../config/sessions/session-actor-contract.js";
 import { createDurableSessionActorFactory } from "../../config/sessions/session-actor-durable.js";
 import { SqliteTranscriptMutationConflictError } from "../../config/sessions/session-mutation-conflict-error.js";
+import { resolveMaintenanceConfigFromInput } from "../../config/sessions/store-maintenance.js";
 import { withOwnedSessionTranscriptWrites } from "../../config/sessions/transcript-write-context.js";
 import { readDatabasePathIdentitySync } from "../../infra/sqlite-worker-identity.js";
 import * as workerAdmission from "../../infra/sqlite-worker-operation-admission.js";
 import { sqliteWorkerOwnerProbe as probe } from "../../infra/sqlite-worker-owner-probe.test-support.js";
-import { openOpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
+import {
+  closeOpenClawAgentDatabaseByPathAsync,
+  openOpenClawAgentDatabase,
+  runOpenClawAgentWriteTransaction,
+} from "../../state/openclaw-agent-db.js";
 import { assertOpenClawAgentWriterReleased } from "../../state/openclaw-agent-write-admission-state.js";
 import {
   createOpenClawTestState,
@@ -59,6 +73,97 @@ const user = (key: string) => ({
   content: `Synthetic input ${key}`,
   timestamp: 1,
   idempotencyKey: `${key}:user`,
+});
+
+it("resumes protected-store maintenance after a lazy worker creates an eligible session", async ({
+  signal,
+}) => {
+  const storePath = state.statePath("lazy-maintenance.sqlite");
+  const scope = { agentId: "main", path: storePath };
+  const protectedKey = "agent:main:lazy-protected";
+  const updatedAt = Date.now();
+  openOpenClawAgentDatabase(scope);
+  runOpenClawAgentWriteTransaction((database) => {
+    for (const key of [protectedKey, "agent:main:lazy-other-protected"]) {
+      writeSessionEntry(database, key, {
+        sessionId: key,
+        updatedAt,
+        modelSelectionLocked: true,
+      });
+    }
+  }, scope);
+  const request = {
+    activeSessionKey: protectedKey,
+    archiveDirectory: path.join(path.dirname(storePath), "lazy-archives"),
+    maintenanceConfig: {
+      ...resolveMaintenanceConfigFromInput(),
+      maxEntries: 1,
+      pruneAfterMs: 86_400_000,
+      archiveDashboardAfterMs: null,
+      preserveRecentMs: null,
+    },
+    scope,
+    storePath,
+  };
+  const settled = createDeferred();
+  const archived = createDeferred();
+  const run = reclamationRun.runSqliteSessionReclamation;
+  let passes = 0;
+  const observe = vi
+    .spyOn(reclamationRun, "runSqliteSessionReclamation")
+    .mockImplementation(async (params) => {
+      if (params.plan.kind === "maintenance-plan") {
+        passes++;
+      }
+      const result = await run(params);
+      if (result.kind === "maintenance-plan") {
+        if (result.value.durableNoCandidates === true) {
+          settled.resolve();
+        }
+        if (result.value.archived > 0) {
+          archived.resolve();
+        }
+      }
+      return result;
+    });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    kickSessionEntryMaintenanceAfterWrite(request);
+    await withinTest(settled.promise, signal);
+    await yieldToEventLoop();
+    const protectedPasses = passes;
+    kickSessionEntryMaintenanceAfterWrite(request);
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect(passes).toBe(protectedPasses);
+
+    const target = {
+      agentId: "main",
+      storePath,
+      sessionKey: "agent:main:lazy-eligible",
+      sessionId: "lazy-eligible",
+    };
+    const manager = await SessionManager.openAsync(target, state.workspaceDir);
+    await manager.appendMessageAsync(user("lazy-maintenance"));
+    expect(loadSessionEntry(target)?.sessionId).toBe(target.sessionId);
+    runOpenClawAgentWriteTransaction((database) => {
+      writeSessionEntry(database, protectedKey, {
+        sessionId: protectedKey,
+        updatedAt: Date.now(),
+        modelSelectionLocked: true,
+        label: "ordinary activity after initialization",
+      });
+    }, scope);
+    kickSessionEntryMaintenanceAfterWrite(request);
+    await yieldToEventLoop();
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect(passes).toBeGreaterThan(protectedPasses);
+    await withinTest(archived.promise, signal);
+    expect(loadSessionEntry(target)?.archiveReason).toBe("active-session-cap");
+  } finally {
+    vi.useRealTimers();
+    await closeOpenClawAgentDatabaseByPathAsync(storePath);
+    observe.mockRestore();
+  }
 });
 
 it.each([1, 2])(
