@@ -640,6 +640,7 @@ it.each([1, 128])(
     const store = await open(databasePath());
     const thread = (await append(store, "retained")).threadId;
     const held = createDeferredCore();
+    let worker: Worker | undefined;
     let release: (() => void) | undefined;
     const messages = vi.spyOn(Worker.prototype, "emit");
     messages.mockImplementation(function (
@@ -648,6 +649,7 @@ it.each([1, 128])(
       ...args: unknown[]
     ) {
       if (event === "message" && this.threadId === thread) {
+        worker = this;
         messages.mockRestore();
         release = () => EventEmitter.prototype.emit.call(this, event, ...args);
         held.resolve();
@@ -661,18 +663,17 @@ it.each([1, 128])(
     let authority: SqliteWorkerMaintenanceAuthority | undefined;
     try {
       await held.promise;
-      const postMessage = Worker.prototype.postMessage;
-      vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (
-        this: Worker,
-        message: SqliteWorkerRequest,
-        ...args
-      ) {
-        if (message.type === "execute" && message.maintenanceAuthority) {
-          authority = message.maintenanceAuthority;
-          expect(isSqliteWorkerMaintenanceAuthorityCurrent(authority)).toBe(true);
-        }
-        return Reflect.apply(postMessage, this, [message, ...args]);
-      });
+      assert(worker, "queued read must retain its worker");
+      const postMessage = worker.postMessage.bind(worker);
+      vi.spyOn(worker, "postMessage").mockImplementation(
+        (message: SqliteWorkerRequest, ...args) => {
+          if (message.type === "execute" && message.maintenanceAuthority) {
+            authority = message.maintenanceAuthority;
+            expect(isSqliteWorkerMaintenanceAuthorityCurrent(authority)).toBe(true);
+          }
+          return postMessage(message, ...args);
+        },
+      );
       const accepted = maintenance.run(async () => read(store));
       const outcome = expect(accepted).resolves.toEqual(["retained"]);
       closing = maintenance.close();
