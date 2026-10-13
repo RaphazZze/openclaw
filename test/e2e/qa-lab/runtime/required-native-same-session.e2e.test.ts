@@ -379,8 +379,8 @@ it.skipIf(process.platform === "win32")(
             .then((result) => {
               record("agent.wait-terminal", { runId, ...result });
               if (result.status !== "ok") {
-                console.info(
-                  "required-native-dispatch-error",
+                record(
+                  "dispatch-error",
                   gateway
                     .logs()
                     .split("\n")
