@@ -5,7 +5,12 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createDeferred, withTestTimeout } from "../../../test/helpers/promise.js";
+import {
+  awaitGateBeforeSettlement,
+  createDeferred,
+  withinTest,
+  withTestTimeout,
+} from "../../../test/helpers/promise.js";
 import { acquireStateDatabaseSchemaLease } from "../../infra/gateway-state-owner.js";
 import { executeSqliteQuerySync } from "../../infra/kysely-sync.js";
 import { openNodeSqliteDatabase, requireNodeSqlite } from "../../infra/node-sqlite.js";
@@ -240,7 +245,9 @@ async function publishedArchive(content = "synthetic retained archive payload") 
   };
 }
 
-it("skips writer admission when the archive budget target is already satisfied", async () => {
+it("skips writer admission when the archive budget target is already satisfied", async ({
+  signal,
+}) => {
   const fixture = await publishedArchive();
   const entered = createDeferred();
   const release = createDeferred();
@@ -258,9 +265,11 @@ it("skips writer admission when the archive budget target is already satisfied",
   await entered.promise;
   const work = fixture.prune(Infinity);
   try {
-    await expect(
-      withTestTimeout(work, 10_000, "Satisfied archive budget waited for a writer"),
-    ).resolves.toMatchObject({ removedFiles: 0, completed: true, checkpointIncomplete: 0 });
+    await expect(withinTest(work, signal)).resolves.toMatchObject({
+      removedFiles: 0,
+      completed: true,
+      checkpointIncomplete: 0,
+    });
     expect(fixture.readArchive()).toEqual(fixture.originalArchive);
     expect(fs.readFileSync(fixture.archivePath)).toEqual(fixture.archivedBytes);
   } finally {
@@ -269,7 +278,9 @@ it("skips writer admission when the archive budget target is already satisfied",
   }
 });
 
-it("lets foreground writes settle while archive pruning scans physical usage", async () => {
+it("lets foreground writes settle while archive pruning scans physical usage", async ({
+  signal,
+}) => {
   const fixture = await publishedArchive();
   const scanning = createDeferred();
   const release = createDeferred();
@@ -287,16 +298,26 @@ it("lets foreground writes settle while archive pruning scans physical usage", a
   void work.catch(scanning.reject);
   let foreground: Promise<unknown> | undefined;
   try {
-    await withTestTimeout(scanning.promise, 10_000, "Archive pruning did not reach its usage scan");
+    await withinTest(
+      awaitGateBeforeSettlement(
+        scanning.promise,
+        work,
+        "Archive pruning did not reach its usage scan",
+      ),
+      signal,
+    );
     foreground = own(
       replaceSessionEntry(
         { sessionKey: "agent:main:foreground", storePath: fixture.storePath },
         { sessionId: "foreground", updatedAt: 2 },
       ),
     );
-    await withTestTimeout(foreground, 10_000, "Physical usage scan held the foreground writer");
+    await withinTest(foreground, signal);
     release.resolve();
-    await expect(work).resolves.toMatchObject({ removedFiles: 1, completed: true });
+    await expect(withinTest(work, signal)).resolves.toMatchObject({
+      removedFiles: 1,
+      completed: true,
+    });
   } finally {
     release.resolve();
     await Promise.allSettled([work, foreground]);

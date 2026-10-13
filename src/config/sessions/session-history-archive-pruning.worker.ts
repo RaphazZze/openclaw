@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { executeSqliteQuerySync } from "../../infra/kysely-sync.js";
+import { readSqliteFreePageCount } from "../../infra/sqlite-wal-reclamation.js";
 import { assertExistingDatabaseIdentity } from "../../infra/sqlite-worker-identity.js";
 import { readOpenClawAgentDatabaseIdentity } from "../../state/openclaw-agent-db-identity.js";
 import {
@@ -27,8 +28,7 @@ export function readSessionArchivePruningInDatabase(
   database: OpenClawAgentReadOnlyDatabase,
   limit = 1,
 ): SessionArchivePruningSnapshot {
-  // sqlite-allow-raw -- The archive reader owns this read-only physical page probe.
-  const freePages = Number(database.db.prepare("PRAGMA freelist_count").get()?.freelist_count ?? 0);
+  const freePages = readSqliteFreePageCount(database.db);
   if (!tableExists(database.db, "session_transcript_archives")) {
     return { archives: [], freePages };
   }
