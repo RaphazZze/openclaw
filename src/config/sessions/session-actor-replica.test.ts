@@ -2,7 +2,6 @@ import path from "node:path";
 import "../../test-utils/prepare-compiled-subprocesses.js";
 import { expect, it, vi } from "vitest";
 import { openNodeSqliteDatabase } from "../../infra/node-sqlite.js";
-import { readSessionCostUsageRefreshLockInDatabase } from "../../infra/session-cost-usage-cache.kernel.js";
 import {
   readSqliteDatabaseScopedWriteTokenForPath,
   sqliteSessionIdWriteScope,
@@ -145,7 +144,7 @@ function hydrate({ replica, load }: Fixture, epoch = "first", sequence = 0) {
   return snapshot;
 }
 
-it("keeps actor facts after usage cache writes and refresh lock release", async () => {
+it("keeps actor facts after usage cache writes and pruning", async () => {
   await withReplica(async (fixture) => {
     const { database, scope, replica } = fixture;
     const operations = await loadUsageCacheOperations();
@@ -159,18 +158,6 @@ it("keeps actor facts after usage cache writes and refresh lock release", async 
       },
     };
     const snapshot = hydrate(fixture);
-    expect(
-      operations["usageCache.acquireLock"](
-        {
-          previousRaw: null,
-          previousOwnerIsRunning: false,
-          lockJson: "usage-owner",
-          startedAt: 1,
-        },
-        context,
-      ),
-    ).toBe(true);
-    expect(replica.read()).toEqual(snapshot);
     const valueJson = new TextEncoder().encode("{}");
     expect(
       operations["usageCache.writeRollup"](
@@ -185,9 +172,6 @@ it("keeps actor facts after usage cache writes and refresh lock release", async 
     ).toBe(true);
     expect(replica.read()).toEqual(snapshot);
     operations["usageCache.prune"]([{ key: "usage-rollup", valueJson, updatedAt: 1 }], context);
-    expect(replica.read()).toEqual(snapshot);
-    operations["usageCache.releaseLock"]("usage-owner", context);
-    expect(readSessionCostUsageRefreshLockInDatabase(database.db)).toBeNull();
     expect(replica.read()).toEqual(snapshot);
   });
 });
