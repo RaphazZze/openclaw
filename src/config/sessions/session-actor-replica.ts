@@ -316,14 +316,8 @@ export function retainSessionActorTranscriptReplica(
 
 function forgetUnused(cell: ReplicaCell): void {
   const key = targetKey(cell.target);
-  if (
-    !cell.handles &&
-    !cell.pending &&
-    !cell.snapshot &&
-    !cell.entry &&
-    !cell.transcript &&
-    pool.cells.get(key) === cell
-  ) {
+  const empty = !cell.snapshot && !cell.entry && !cell.transcript;
+  if (!cell.handles && !cell.pending && empty && pool.cells.get(key) === cell) {
     pool.cells.delete(key);
   }
 }
@@ -429,6 +423,9 @@ export function readSessionActorEntryFacts(
         : state.entry,
     members: state.members,
     participants: state.participants,
+    coldArchiveAbsent:
+      cell.snapshot?.transcript.modelContext.kind === "resident" ||
+      cell.snapshot?.transcript.modelContext.reason === "projection",
     snapshots:
       snapshotFields === "full"
         ? snapshots
@@ -459,6 +456,19 @@ function readCurrentEntryCellForPath(params: { path: string; sessionKey: string 
     }
   }
   return undefined;
+}
+
+/** Only the complete actor postimage covers pending-input absence for its current window. */
+export function hasSessionActorEmptyPendingInputHistory(
+  path: string,
+  sessionKey: string,
+  sessionId: string,
+): boolean {
+  const snapshot = readCurrentEntryCellForPath({ path, sessionKey })?.cell.snapshot;
+  return (
+    snapshot?.entry?.sessionId === sessionId &&
+    snapshot.pendingInputs.every((row) => row.consumed_event_id !== null)
+  );
 }
 
 /** Complete transcript bodies share the actor's receipt token and bounded residency. */

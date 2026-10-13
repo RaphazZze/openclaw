@@ -372,6 +372,17 @@ rollback retains the previous facts. Cold, evicted, or invalidated actors use th
 canonical participant read. Participant updates remain independent of metadata CAS.
 This changes no schema, retention, stored format, or update behavior.
 
+Reply-initialization cohorts reuse those entry facts only when the selected entry
+and its parent are both covered. Cold-archive absence requires a complete actor
+snapshot; entry-only facts do not prove it. Archive/restore receipts invalidate
+that snapshot. Lifecycle planning and commit reuse the current actor entry for
+single-entry changes, while retaining the lost-update comparison and uncovered
+count, archive, and maintenance reads. Pending-input history can skip its worker
+request only when the complete actor snapshot proves no unconsumed inputs for
+the requested current window. Staging, consumption, replacement, and unknown
+writes update or invalidate these facts through existing owner receipts; restart
+and eviction return to the canonical readers.
+
 ## Session and ancillary worker operations
 
 Bounded transcript hydration retains its result in the existing session actor
