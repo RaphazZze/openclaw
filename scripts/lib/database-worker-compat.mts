@@ -75,6 +75,8 @@ const reviewed = new Map<string, readonly string[]>([
     "extensions/imessage/src/conversation-bindings.ts",
     ["createIMessageConversationBindingManager"],
   ],
+  ["src/infra/outbound/session-binding-service.ts", ["inspectSessionBindingByConversation"]],
+  ["src/channels/plugins/binding-routing.ts", ["resolveRuntimeConversationBindingRoute"]],
   ["extensions/matrix/auth-presence.ts", ["hasAnyMatrixAuth"]],
   [
     "src/agents/harness/native-session/binding-lifecycle.ts",
@@ -124,6 +126,31 @@ const reviewedMembers = new Map<string, readonly string[]>([
       "createModelAccountConnectService.status",
       "createModelAccountConnectService.cancel",
     ],
+  ],
+  [
+    "src/infra/outbound/session-binding-service.ts",
+    [
+      "DEFAULT_SESSION_BINDING_SERVICE.listBySession",
+      "DEFAULT_SESSION_BINDING_SERVICE.resolveByConversation",
+      "DEFAULT_SESSION_BINDING_SERVICE.touch",
+    ],
+  ],
+  [
+    "src/plugin-state/plugin-state-store.legacy.ts",
+    [
+      "createSyncKeyedStore.register",
+      "createSyncKeyedStore.registerIfAbsent",
+      "createSyncKeyedStore.update",
+      "createSyncKeyedStore.deleteIf",
+      "createSyncKeyedStore.lookupMany",
+      "createSyncKeyedStore.consume",
+      "createSyncKeyedStore.delete",
+      "createSyncKeyedStore.clear",
+    ],
+  ],
+  [
+    "src/plugin-state/plugin-state-store.ts",
+    ["createKeyedStoreForPluginId.update", "createKeyedStoreForPluginId.deleteIf"],
   ],
 ]);
 
@@ -295,6 +322,10 @@ export function inspectDatabaseWorkerBoundaries(
   }
   const config = ".openclaw-database-worker-compat.tsconfig.json";
   const files = Object.fromEntries(sourceTexts);
+  // Keep historical snapshots hermetic, but preserve member identities through
+  // Required<T>: without this standard mapped type, noLib erases those receivers.
+  const globals = ".openclaw-database-worker-compat.globals.d.ts";
+  files[globals] = "type Required<T> = { [P in keyof T]-?: T[P] };";
   files[config] = JSON.stringify({
     compilerOptions: {
       allowJs: true,
@@ -311,7 +342,7 @@ export function inspectDatabaseWorkerBoundaries(
         "@openclaw/plugin-sdk/*": ["./src/plugin-sdk/*.ts"],
       },
     },
-    files: [...sourceTexts.keys()],
+    files: [...sourceTexts.keys(), globals],
     include: [],
   });
   // The supplied snapshot owns all source bytes, including historical comparisons.
@@ -348,7 +379,13 @@ export function inspectDatabaseWorkerBoundaries(
       } else if (
         (ts.isVariableDeclaration(parent) || ts.isPropertyAssignment(parent)) &&
         parent.initializer &&
-        (ts.isArrowFunction(parent.initializer) || ts.isFunctionExpression(parent.initializer)) &&
+        (ts.isArrowFunction(parent.initializer) ||
+          ts.isFunctionExpression(parent.initializer) ||
+          (ts.isVariableDeclaration(parent) &&
+            ts.isObjectLiteralExpression(parent.initializer) &&
+            ts.isVariableDeclarationList(parent.parent) &&
+            ts.isVariableStatement(parent.parent.parent) &&
+            ts.isSourceFile(parent.parent.parent.parent))) &&
         ts.isIdentifier(parent.name)
       ) {
         parts.unshift(parent.name.text);
@@ -377,6 +414,7 @@ export function inspectDatabaseWorkerBoundaries(
   };
   const registered = new Map<Symbol, BoundaryOperation>();
   const declarations = new Map<ts.Node, BoundaryOperation>();
+  const contractDeclarations = new Map<ts.Node, BoundaryOperation>();
   const declarationNames = new Set<ts.Node>();
   const families = new Map<BoundaryOperation, Set<BoundaryOperation>>();
   const names = new Set(
@@ -445,6 +483,22 @@ export function inspectDatabaseWorkerBoundaries(
         node,
       };
       registered.set(symbol, operation);
+      const object = ts.isMethodDeclaration(node)
+        ? node.parent
+        : ts.isArrowFunction(node) && ts.isPropertyAssignment(node.parent)
+          ? node.parent.parent
+          : undefined;
+      if (member && object && ts.isObjectLiteralExpression(object)) {
+        // Explicit receiver types create distinct symbols at each instantiation.
+        // Match their member declaration, never the spelling on unrelated stores.
+        const contract = checker.getContextualType(object)?.getProperty(nameNode.getText());
+        if (contract) {
+          forwarded.set(contract, symbol);
+          for (const declaration of contract.declarations) {
+            contractDeclarations.set(declaration.resolve(), operation);
+          }
+        }
+      }
       declarations.set(node, operation);
       declarationNames.add(nameNode);
     }
@@ -487,9 +541,13 @@ export function inspectDatabaseWorkerBoundaries(
         }
       }
     }
-    const family = families.get(owner) ?? new Set<BoundaryOperation>();
-    family.add(member);
-    families.set(owner, family);
+    // An explicitly reviewed member has its own compatibility boundary even
+    // when its factory also creates live async methods.
+    if (!member.reviewed) {
+      const family = families.get(owner) ?? new Set<BoundaryOperation>();
+      family.add(member);
+      families.set(owner, family);
+    }
     return member;
   };
   const primitives = new Set([
@@ -505,7 +563,7 @@ export function inspectDatabaseWorkerBoundaries(
   while (pending.length > 0) {
     const references: ts.Node[] = [];
     const visit = (node: ts.Node) => {
-      if (ts.isTypeNode(node)) {
+      if (ts.isTypeNode(node) || declarations.get(node)?.reviewed) {
         return;
       }
       if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
@@ -698,6 +756,9 @@ export function inspectDatabaseWorkerBoundaries(
     const declaration = symbol.valueDeclaration?.resolve();
     const direct =
       registered.get(symbol) ??
+      symbol.declarations
+        .map((contract) => contractDeclarations.get(contract.resolve()))
+        .find((operation) => operation !== undefined) ??
       (declaration
         ? declarations.get(
             ts.isPropertyAssignment(declaration) ? declaration.initializer : declaration,

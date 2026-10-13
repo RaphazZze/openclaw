@@ -237,6 +237,151 @@ it("keeps a local legacy helper live when an async sibling calls it", () => {
   );
 });
 
+it("isolates reviewed members when a legacy wrapper and live factory share their receiver", () => {
+  const result = inspect({
+    [kernelFile]: kernel,
+    [mixedReceiverFile]: mixedReceiver,
+    [secondFile]: `
+      import { createModelAccountConnectService } from '../gateway/model-account-connect.js';
+      /** @deprecated Use the worker API. */
+      export function ${second}() { return createModelAccountConnectService(); }
+    `,
+    "src/consumer.ts": `
+      import { createModelAccountConnectService } from './gateway/model-account-connect.js';
+      createModelAccountConnectService().listLinksAsync();
+    `,
+  });
+  expect(result.violations).toEqual([]);
+  expect(result.operations.get(kernelFile)).toEqual(new Set(["readKernel"]));
+  expect(result.operations.get(mixedReceiverFile)).toEqual(
+    new Set([
+      "createModelAccountConnectService.listLinks",
+      "createModelAccountConnectService.readLegacy",
+    ]),
+  );
+});
+
+const bindingServiceFile = "src/infra/outbound/session-binding-service.ts";
+const bindingService = `
+  import { readKernel } from '../../session-kernel.js';
+  type LegacyService = { listBySession: () => number };
+  type Service = LegacyService & { listBySessionAsync: () => Promise<number> };
+  const DEFAULT_SESSION_BINDING_SERVICE: Service = {
+    /** @deprecated Await listBySessionAsync. */
+    listBySession: () => readKernel(),
+    listBySessionAsync: async () => 1,
+  };
+  export function getService(): Service { return DEFAULT_SESSION_BINDING_SERVICE; }
+`;
+
+it("isolates a typed singleton's deprecated member while its async API stays live", () => {
+  const result = inspect({
+    [kernelFile]: kernel,
+    [bindingServiceFile]: bindingService,
+    "src/consumer.ts": `
+      import { getService } from './infra/outbound/session-binding-service.js';
+      getService().listBySessionAsync();
+    `,
+  });
+  expect(result.violations).toEqual([]);
+  expect(result.operations.get(kernelFile)).toEqual(new Set(["readKernel"]));
+  expect(result.operations.get(bindingServiceFile)).toEqual(
+    new Set(["DEFAULT_SESSION_BINDING_SERVICE.listBySession"]),
+  );
+});
+
+it.each([
+  ["call", "service.listBySession();"],
+  ["escape", "register(service.listBySession);"],
+])("rejects a bundled %s through the singleton's returned service type", (_label, use) => {
+  const result = inspect({
+    [kernelFile]: kernel,
+    [bindingServiceFile]: bindingService,
+    "src/consumer.ts": `
+      import { getService } from './infra/outbound/session-binding-service.js';
+      const service = getService(); ${use}
+    `,
+  });
+  expect(result.operations.has(kernelFile)).toBe(false);
+  expect(result.operations.has(bindingServiceFile)).toBe(false);
+  expect(result.violations).toEqual([expect.stringContaining("src/consumer.ts:")]);
+});
+
+const pluginStateLegacyFile = "src/plugin-state/plugin-state-store.legacy.ts";
+const legacyStoreMethods = [
+  "register",
+  "registerIfAbsent",
+  "update",
+  "deleteIf",
+  "lookupMany",
+  "consume",
+  "delete",
+  "clear",
+];
+const legacyStore = `
+  import { readKernel } from '../session-kernel.js';
+  export type Store<T> = {
+    ${legacyStoreMethods.map((name) => `${name}?: (value: T) => number;`).join("\n")}
+    lookup(): number;
+    entries(): number;
+  };
+  export function createSyncKeyedStore<T>(): Required<Store<T>> {
+    return {
+      ${legacyStoreMethods
+        .map(
+          (name) =>
+            `/** @deprecated Await the V2 store. */ ${name}(value) { return readKernel(); },`,
+        )
+        .join("\n")}
+      lookup() { return 1; },
+      entries() { return 1; },
+    };
+  }
+  export declare const runtime: { openSyncKeyedStore<T>(): Store<T> };
+`;
+
+it.each([
+  ["Required factory", "createSyncKeyedStore<number>()"],
+  ["runtime contract", "runtime.openSyncKeyedStore<number>()"],
+])("guards every legacy store member through the %s", (_label, factory) => {
+  for (const escape of [false, true]) {
+    const result = inspect({
+      [kernelFile]: kernel,
+      [pluginStateLegacyFile]: legacyStore,
+      "src/consumer.ts": `
+        import { createSyncKeyedStore, runtime } from './plugin-state/plugin-state-store.legacy.js';
+        const store = ${factory};
+        ${legacyStoreMethods.map((name) => (escape ? `retain(store.${name});` : `store.${name}(1);`)).join("\n")}
+      `,
+    });
+    expect(result.operations.has(kernelFile)).toBe(false);
+    expect(result.violations).toHaveLength(legacyStoreMethods.length);
+    for (const name of legacyStoreMethods) {
+      expect(result.violations).toContainEqual(
+        expect.stringContaining(`createSyncKeyedStore.${name}`),
+      );
+    }
+  }
+});
+
+it("keeps scalar authority and unguarded projection reads independent of guarded store members", () => {
+  const result = inspect({
+    [kernelFile]: kernel,
+    [pluginStateLegacyFile]: legacyStore,
+    "src/consumer.ts": `
+      import { createSyncKeyedStore } from './plugin-state/plugin-state-store.legacy.js';
+      const store = createSyncKeyedStore<number>();
+      store.lookup();
+      store.entries();
+    `,
+  });
+  expect(result.violations).toEqual([]);
+  expect(result.operations.get(kernelFile)).toEqual(new Set(["readKernel"]));
+  expect(result.operations.get(pluginStateLegacyFile)).toEqual(
+    new Set(legacyStoreMethods.map((name) => `createSyncKeyedStore.${name}`)),
+  );
+});
+
 it("does not trust a same-named deprecated member on another factory", () => {
   const result = inspect({
     [kernelFile]: kernel,
