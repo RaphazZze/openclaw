@@ -288,8 +288,10 @@ Memory retrieval workers borrow the existing agent read-only owner across query
 awaits and release each borrow before replying. The owner retains the idle reader
 and its prepared statements, with committed-write invalidation and physical-file
 replacement handled by its existing lifecycle. Vector-extension probing keeps a
-separate extension-capable connection. Search queries, ranking, result bounds,
-schemas, and update behavior are unchanged.
+separate extension-capable connection. Memory-origin and forgotten-session reads
+use the same retained reader owner instead of opening a connection per request;
+committed writes still refresh origin rows and tombstone membership. Search
+queries, ranking, result bounds, schemas, and update behavior are unchanged.
 
 Transcript readers retain bounded hot/cold facts under the existing session write
 receipts. Archive, restore, session deletion, and native writes invalidate those
@@ -6556,7 +6558,11 @@ separate worker migration.
 Shared and per-agent auth-profile success and failure bookkeeping use the existing
 auth-profile shared-state domain and canonical agent executor. The caller captures
 the physical stores and execution authority before preparing inherited ownership
-and provider observations. Workers reread the current rows and apply the same health
+and provider observations. Overlapping health preparations remain ordered, but
+candidate stores do not reserve the database writer while read-only children load
+rows or provider probes run. Only a ready write joins its selected database FIFO;
+unrelated session writes can proceed during preparation. Workers reread the current
+rows and apply the same health
 reducers used for personal model accounts; inherited success clears health without
 changing the shared owner's last-good selection or rotation time. Committed facts
 update the existing runtime snapshot owner. Gateway close refuses new bookkeeping

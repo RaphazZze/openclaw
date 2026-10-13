@@ -37,10 +37,10 @@ import { buildMockOpenAiResponsesProvider } from "./test-openai-responses-model.
 function holdSessionAuthorization(sessionKey: string) {
   const authorizationCaptured = createDeferredCore();
   const resumeAuthorization = createDeferredCore();
-  const authorize = sessionSharingAuthorization.resolveSessionMutationAuthorizationAsync;
+  const resolveAuthorization = sessionSharingAuthorization.resolveSessionMutationAuthorizationAsync;
   let held = false;
-  const authorizeWithHold: typeof authorize = async (params) => {
-    const reply = await authorize(params);
+  const resolveWithHold: typeof resolveAuthorization = async (params) => {
+    const reply = await resolveAuthorization(params);
     if (
       !held &&
       params.method === "chat.send" &&
@@ -49,14 +49,14 @@ function holdSessionAuthorization(sessionKey: string) {
     ) {
       held = true;
       authorizationCaptured.resolve();
-      // Real preparation retains authority and releases its writer FIFO before revocation.
+      // Revoke captured authority before the handler can persist or dispatch input.
       await resumeAuthorization.promise;
     }
     return reply;
   };
   const authorization = vi
     .spyOn(sessionSharingAuthorization, "resolveSessionMutationAuthorizationAsync")
-    .mockImplementation(authorizeWithHold);
+    .mockImplementation(resolveWithHold);
   return {
     entered: authorizationCaptured.promise,
     resume: () => resumeAuthorization.resolve(),
