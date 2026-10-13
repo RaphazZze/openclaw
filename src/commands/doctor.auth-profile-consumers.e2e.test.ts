@@ -32,7 +32,6 @@ import { getFreePort } from "../test-utils/ports.js";
 async function runDoctor(env: NodeJS.ProcessEnv) {
   await closeOpenClawAgentDatabasesAsync();
   await closeOpenClawStateDatabaseAsync();
-  const startedAt = performance.now();
   const result = spawnSync(
     process.execPath,
     ["openclaw.mjs", "doctor", "--fix", "--non-interactive", "--no-workspace-suggestions"],
@@ -43,14 +42,7 @@ async function runDoctor(env: NodeJS.ProcessEnv) {
       timeout: 60_000,
     },
   );
-  expect(
-    result.status,
-    [
-      `Doctor exited after ${Math.round(performance.now() - startedAt)}ms: status=${result.status}, signal=${result.signal}, error=${result.error ?? "none"}`,
-      `stdout:\n${result.stdout}`,
-      `stderr:\n${result.stderr}`,
-    ].join("\n"),
-  ).toBe(0);
+  expect(result.status, result.stderr || result.stdout).toBe(0);
   clearRuntimeAuthProfileStoreSnapshots();
 }
 

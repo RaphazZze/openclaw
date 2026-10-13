@@ -445,12 +445,8 @@ if (process.argv[2] === "--version") {
       }),
     ]);
 
-    // Report the child failure when execution never produced a result.
-    const output = await fs.readFile(outputPath, "utf8").catch((error: unknown) => {
-      throw completion.status === "rejected" ? completion.reason : error;
-    });
     // A completed result followed by a timeout identifies retained process resources.
-    expect(JSON.parse(output)).toMatchObject({
+    expect(JSON.parse(await fs.readFile(outputPath, "utf8"))).toMatchObject({
       payloads: [{ text: "PLUGIN_HARNESS_OK" }],
     });
     expect(completion).toMatchObject({ status: "fulfilled" });
