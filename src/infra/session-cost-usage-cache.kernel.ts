@@ -39,23 +39,45 @@ function cacheJsonText(value: SessionCostUsageJson) {
 
 export function readSessionCostUsageRollupRowsInDatabase(
   db: DatabaseSync,
+  filePaths: readonly string[] | undefined,
+  options: { includeBody: true; throwIfCancelled?: () => void },
+): Array<SessionCostUsageRollupRow & { blob: Uint8Array | null }>;
+export function readSessionCostUsageRollupRowsInDatabase(
+  db: DatabaseSync,
   filePaths?: readonly string[],
-): SessionCostUsageRollupRow[] {
+  options?: { includeBody?: false; throwIfCancelled?: () => void },
+): SessionCostUsageRollupRow[];
+export function readSessionCostUsageRollupRowsInDatabase(
+  db: DatabaseSync,
+  filePaths?: readonly string[],
+  options?: { includeBody?: boolean; throwIfCancelled?: () => void },
+): Array<SessionCostUsageRollupRow & { blob?: Uint8Array | null }> {
   const kysely = getNodeSqliteKysely<AgentCacheDatabase>(db);
   // Bound SQL parameters even when a historical family contains many instances.
   const batches = filePaths ? chunkItems([...new Set(filePaths)], 500) : [undefined];
   return batches
     .flatMap((keys) => {
+      options?.throwIfCancelled?.();
       const query = kysely
         .selectFrom("cache_entries")
         .select(["key", "value_json", "updated_at"])
+        .select((eb) => [
+          options?.includeBody ? eb.ref("blob").as("blob") : eb.val(null).as("blob"),
+        ])
         .where("scope", "=", ROLLUP_SCOPE);
       return executeSqliteQuerySync(db, keys ? query.where("key", "in", keys) : query).rows;
     })
     .flatMap((row) =>
       row.value_json === null
         ? []
-        : [{ key: row.key, valueJson: row.value_json, updatedAt: row.updated_at }],
+        : [
+            {
+              key: row.key,
+              valueJson: row.value_json,
+              updatedAt: row.updated_at,
+              ...(options?.includeBody ? { blob: row.blob } : {}),
+            },
+          ],
     );
 }
 

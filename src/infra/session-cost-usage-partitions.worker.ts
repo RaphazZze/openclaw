@@ -4,6 +4,7 @@ import { expressionBuilder } from "kysely";
 import type { DB } from "../state/openclaw-agent-db.generated.js";
 import { chunkItems } from "../utils/chunk-items.js";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "./kysely-sync.js";
+import type { SessionCostUsageRollupRow } from "./session-cost-usage-cache.kernel.js";
 import {
   USAGE_COST_PARTITION_SCOPE,
   usageCostPartitionKey,
@@ -79,34 +80,60 @@ export function writeSessionCostUsagePartitionsInDatabase(
 
 export function readSessionCostUsagePartitionsInDatabase(
   db: DatabaseSync,
-  filePath: string,
+  filePaths: readonly string[],
   startMs = Number.NEGATIVE_INFINITY,
   endMs = Number.POSITIVE_INFINITY,
-): UsageCostPartition[] {
+  throwIfCancelled?: () => void,
+): Map<string, UsageCostPartition[]> {
   assertUsagePartitionWorker();
   const start = Number.isFinite(startMs) ? `${new Date(startMs).toISOString().slice(0, 7)}-01` : "";
   const end = Number.isFinite(endMs) ? `${new Date(endMs).toISOString().slice(0, 7)}-01` : "\uffff";
-  return executeSqliteQuerySync(
-    db,
-    getNodeSqliteKysely<CacheDatabase>(db)
-      .selectFrom("cache_entries")
-      .select(["key", "value_json", "blob"])
-      .where("scope", "=", USAGE_COST_PARTITION_SCOPE)
-      .where("key", ">=", usageCostPartitionKey(filePath, start))
-      .where("key", "<=", usageCostPartitionKey(filePath, end))
-      .orderBy("key", "asc"),
-  ).rows.flatMap((row) =>
-    row.value_json !== null && row.blob !== null
-      ? [{ date: row.key.slice(filePath.length + 1), valueJson: row.value_json, blob: row.blob }]
-      : [],
-  );
+  const byPath = new Map<string, UsageCostPartition[]>();
+  const kysely = getNodeSqliteKysely<CacheDatabase>(db);
+  for (const paths of chunkItems([...new Set(filePaths)], 100)) {
+    throwIfCancelled?.();
+    const rows = executeSqliteQuerySync(
+      db,
+      kysely
+        .selectFrom("cache_entries")
+        .select(["key", "value_json", "blob"])
+        .where((eb) =>
+          eb.or(
+            paths.map((filePath) =>
+              eb.and([
+                eb("scope", "=", USAGE_COST_PARTITION_SCOPE),
+                eb("key", ">=", usageCostPartitionKey(filePath, start)),
+                eb("key", "<=", usageCostPartitionKey(filePath, end)),
+              ]),
+            ),
+          ),
+        )
+        .orderBy("key", "asc"),
+    ).rows;
+    for (const row of rows) {
+      if (row.value_json === null || row.blob === null) {
+        continue;
+      }
+      const separator = row.key.lastIndexOf("\0");
+      const filePath = row.key.slice(0, separator);
+      const partitions = byPath.get(filePath) ?? [];
+      partitions.push({
+        date: row.key.slice(separator + 1),
+        valueJson: row.value_json,
+        blob: row.blob,
+      });
+      byPath.set(filePath, partitions);
+    }
+  }
+  return byPath;
 }
 
 export function readSessionCostUsageRollupWithPartitionsInDatabase(
   db: DatabaseSync,
-  snapshot: { key: string },
+  snapshot: SessionCostUsageRollupRow,
 ): { blob: Uint8Array | null; partitions: UsageCostPartition[] } | undefined {
   assertUsagePartitionWorker();
+  // Refresh yields before this read; a replacement's partitions cannot join the old checkpoint.
   const rows = executeSqliteQuerySync(
     db,
     getNodeSqliteKysely<CacheDatabase>(db)
@@ -114,7 +141,12 @@ export function readSessionCostUsageRollupWithPartitionsInDatabase(
       .select(["scope", "key", "value_json", "blob"])
       .where((eb) =>
         eb.or([
-          eb.and([eb("scope", "=", USAGE_COST_ROLLUP_SCOPE), eb("key", "=", snapshot.key)]),
+          eb.and([
+            eb("scope", "=", USAGE_COST_ROLLUP_SCOPE),
+            eb("key", "=", snapshot.key),
+            eb("updated_at", "=", snapshot.updatedAt),
+            eb("value_json", "=", snapshot.valueJson),
+          ]),
           eb.and([
             eb("scope", "=", USAGE_COST_PARTITION_SCOPE),
             eb("key", ">=", `${snapshot.key}\0`),

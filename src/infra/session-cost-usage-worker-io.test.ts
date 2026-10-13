@@ -146,6 +146,9 @@ if (!isMainThread) {
       for (const method of ["all", "get", "iterate"]) {
         const original = statement[method];
         statement[method] = function(...args) {
+          if (args.includes("session-cost-usage-projection-v1")) {
+            record({ kind: "partitions" });
+          }
           if (!args.includes("session-cost-usage-rollup-v3")) {
             return Reflect.apply(original, this, args);
           }
@@ -193,6 +196,7 @@ if (!isMainThread) {
               | { kind: "transcript-stats" }
               | { kind: "hot-watermark" }
               | { kind: "cache" }
+              | { kind: "partitions" }
               | { kind: "cache-row"; key: string; valueBytes: number }
               | { kind: "transcript"; method: string; start: number },
         ),
@@ -752,7 +756,10 @@ if (!isMainThread) {
         ["2026-02-06"],
       ]);
       const reads = await probe.read();
-      expect(reads.filter((entry) => entry.kind === "cache")).toHaveLength(3);
+      expect(
+        reads.filter((entry) => entry.kind === "cache" || entry.kind === "partitions").length,
+        "selected report cache queries must amortize metadata, bodies, and partitions",
+      ).toBeLessThanOrEqual(sessions.length);
       expect(reads.filter((entry) => entry.kind === "transcript")).toEqual([]);
       const cacheRows = reads.filter((entry) => entry.kind === "cache-row");
       const returnedBytes = cacheRows.reduce((total, row) => total + row.valueBytes, 0);

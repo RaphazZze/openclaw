@@ -28,7 +28,7 @@ import { refreshCostUsageCacheForAgent } from "../../infra/session-cost-usage-ag
 import { discoverAllSessions, loadSessionCostSummary } from "../../infra/session-cost-usage.js";
 import type { AssistantMessage } from "../../llm/types.js";
 import { buildUsageOverview } from "../../shared/usage-overview.js";
-import type { SessionsUsageResult, UsageOverviewSession } from "../../shared/usage-types.js";
+import type { SessionsUsageResult } from "../../shared/usage-types.js";
 import { unregisterOpenClawAgentDatabase } from "../../state/openclaw-agent-db-registry.js";
 import { openOpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
@@ -114,7 +114,7 @@ it("preserves global session addition order across agents before overview pagina
   await withUsageState(async (state) => {
     const config = getRuntimeConfig();
     const startMs = Date.UTC(2026, 8, 18);
-    const sessions: UsageOverviewSession[] = [];
+    const sessions = [];
     for (const [index, cost] of [0.2, 0.1, 0.3].entries()) {
       const agentId = index === 1 ? "opus" : "main";
       const sessionId = `ordered-${index}`;
@@ -165,8 +165,9 @@ it("preserves global session addition order across agents before overview pagina
     });
     const result = {
       ...buildUsageOverview({
-        sessions,
-        summaries: loaded.summaries,
+        rows: sessions.map((session, index) =>
+          Object.assign({}, session, { usage: loaded.summaries[index] }),
+        ),
         options: { offset: 1 },
         dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
       }),

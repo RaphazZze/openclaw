@@ -10,7 +10,6 @@ import {
   getSessionKysely,
   resolveSqliteReadScope,
   toDatabaseOptions,
-  type SessionSqliteTargetResolutionCache,
 } from "../config/sessions/session-accessor.sqlite-scope.js";
 import { transcriptEventJsonSql } from "../config/sessions/transcript-payload.js";
 import {
@@ -103,11 +102,8 @@ export async function executeUsageCostWorker(
     // SAFETY: Channel request IDs pair this value with the host dispatch for the requested kind.
     return reply.value as UsageCostWorkerHostEffects[Kind]["output"];
   };
-  const targetCache: SessionSqliteTargetResolutionCache = new Map();
   const target = (agentId: string, storePath: string) => {
-    const options = toDatabaseOptions(
-      resolveSqliteReadScope({ agentId, storePath, env }, targetCache),
-    );
+    const options = toDatabaseOptions(resolveSqliteReadScope({ agentId, storePath, env }));
     const owned = input.databases.find(
       (entry) => entry.agentId === options.agentId && entry.path === options.path,
     );
@@ -180,7 +176,6 @@ export async function executeUsageCostWorker(
     });
     return result.found ? result.value : missing;
   };
-  const refreshReceipt = refreshInputs?.rollupReceipt();
   const readMetadata = async (): Promise<{
     found: boolean;
     rows: SessionCostUsageRollupRow[];
@@ -223,20 +218,15 @@ export async function executeUsageCostWorker(
         readCache((db) => readSessionCostUsageRollupBodyInDatabase(db, row), undefined),
       ),
     );
-  const readPartitions = (filePath: string, startMs?: number, endMs?: number) =>
-    control.runNativeSection(() =>
-      readDatabase(cacheDatabase, () =>
-        readCache(
-          (db) => readSessionCostUsagePartitionsInDatabase(db, filePath, startMs, endMs),
-          [],
-        ),
-      ),
-    );
   const readPartitionedBody = async (row: SessionCostUsageRollupRow) => {
-    const receipt = refreshReceipt;
-    const cached = refreshInputs?.readRollup(row.key, receipt)?.body;
-    if (cached) {
-      return cached;
+    const receipt = refreshInputs?.rollupReceipt();
+    const cached = refreshInputs?.readRollup(row.key, receipt);
+    if (
+      cached?.body &&
+      cached.row.updatedAt === row.updatedAt &&
+      cached.row.valueJson === row.valueJson
+    ) {
+      return cached.body;
     }
     const body = await control.runNativeSection(() =>
       readDatabase(cacheDatabase, () =>
@@ -303,11 +293,7 @@ export async function executeUsageCostWorker(
     const project = async (
       rows: SessionCostUsageRollupRow[],
       body: (row: SessionCostUsageRollupRow) => Uint8Array | null | Promise<Uint8Array | null>,
-      partitions: (
-        filePath: string,
-        startMs?: number,
-        endMs?: number,
-      ) => UsageCostPartition[] | Promise<UsageCostPartition[]> = readPartitions,
+      partitions: (filePath: string) => UsageCostPartition[] = () => [],
     ): Promise<UsageCostWorkerResult> => {
       // Capture cache metadata before transcript stats: a concurrent refresh must
       // not make a valid newer checkpoint appear ahead of this report's inventory.
@@ -396,18 +382,28 @@ export async function executeUsageCostWorker(
         try {
           // sqlite-allow-raw: This dedicated read-only handle owns the complete report snapshot.
           db.exec("BEGIN DEFERRED");
+          const bodies = new Map<string, Uint8Array | null>();
+          const rows = readSessionCostUsageRollupRowsInDatabase(db, selectedPaths, {
+            includeBody: true,
+            throwIfCancelled: control.throwIfCancelled,
+          }).map(({ blob, ...row }) => {
+            bodies.set(row.key, blob);
+            return row;
+          });
+          const partitions = readSessionCostUsagePartitionsInDatabase(
+            db,
+            rows.map((row) => row.key),
+            operation.startMs,
+            operation.endMs,
+            control.throwIfCancelled,
+          );
           return await project(
-            readSessionCostUsageRollupRowsInDatabase(db, selectedPaths),
+            rows,
             (row) => {
               control.throwIfCancelled();
-              const body = readSessionCostUsageRollupBodyInDatabase(db, row);
-              if (!body) {
-                throw new WorkerTaskError("Usage cache snapshot is unavailable", "unavailable");
-              }
-              return body.blob;
+              return bodies.get(row.key) ?? null;
             },
-            (filePath, startMs, endMs) =>
-              readSessionCostUsagePartitionsInDatabase(db, filePath, startMs, endMs),
+            (filePath) => partitions.get(filePath) ?? [],
           );
         } finally {
           try {

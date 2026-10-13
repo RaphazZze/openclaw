@@ -1,20 +1,14 @@
-import { createSessionCostSummaryAccumulator } from "../infra/session-cost-usage-rollup.js";
 import {
   addCostUsageTotals,
   createEmptyCostUsageTotals,
 } from "../infra/session-cost-usage-totals.js";
-import type {
-  CostUsageTotals,
-  SessionCostSummary,
-  UsageDailyBucket,
-} from "../infra/session-cost-usage.types.js";
+import type { CostUsageTotals, UsageDailyBucket } from "../infra/session-cost-usage.types.js";
 import { createUsageAggregateAccumulator } from "./usage-aggregates.js";
 import { filterSessionsByQuery } from "./usage-query.js";
 import type {
   SessionUsageEntry,
   SessionsUsageOverview,
   UsageOverviewOptions,
-  UsageOverviewSession,
   UsageOverviewSlice,
 } from "./usage-types.js";
 
@@ -291,46 +285,14 @@ export function selectUsageOverviewPage(params: {
   return usageOverviewPage(roster, params.options);
 }
 
-export function buildUsageOverview(
-  params: (
-    | { sessions: UsageOverviewSession[]; summaries: Array<SessionCostSummary | null> }
-    | { rows: SessionUsageEntry[] }
-  ) & {
-    options: UsageOverviewOptions;
-    dayBucket: UsageDailyBucket;
-    compact?: boolean;
-  },
-): UsageOverviewSlice {
-  const { options } = params;
+export function buildUsageOverview(params: {
+  rows: SessionUsageEntry[];
+  options: UsageOverviewOptions;
+  dayBucket: UsageDailyBucket;
+  compact?: boolean;
+}): UsageOverviewSlice {
+  const { options, rows: sessions } = params;
   const calendar = createCalendar(params.dayBucket);
-  let index = 0;
-  const sessions =
-    "rows" in params
-      ? params.rows
-      : params.sessions.map(({ instances, ...entry }): SessionUsageEntry => {
-          if (instances.length === 1) {
-            const usage = params.summaries[index++] ?? null;
-            return { ...entry, usage, ...(!usage ? { computing: true } : {}) };
-          }
-          const accumulator = createSessionCostSummaryAccumulator({
-            sessionId: entry.sessionId,
-            sessionFile: instances[0]?.sessionFile,
-          });
-          let present = false;
-          for (const [offset] of instances.entries()) {
-            const summary = params.summaries[index + offset];
-            if (summary) {
-              accumulator.add(summary);
-              present = true;
-            }
-          }
-          index += instances.length;
-          return {
-            ...entry,
-            usage: present ? accumulator.finish() : null,
-            ...(!present ? { computing: true } : {}),
-          };
-        });
   const filters = {
     agent: new Set<string>(),
     channel: new Set<string>(),
