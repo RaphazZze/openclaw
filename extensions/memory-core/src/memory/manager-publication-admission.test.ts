@@ -1,18 +1,21 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { ensureMemoryIndexSchema } from "openclaw/plugin-sdk/memory-core-host-engine-schema";
+import { promisify } from "node:util";
+import {
+  resolveRuntimeWorkerArgv,
+  resolveRuntimeWorkerUrl,
+} from "openclaw/plugin-sdk/process-runtime";
 import {
   openNodeSqliteDatabase,
   openOpenClawAgentDatabase,
 } from "openclaw/plugin-sdk/sqlite-runtime";
-import {
-  closeOpenClawAgentDatabasesAsync,
-  observeHostDataSql,
-} from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { withOpenClawTestState } from "openclaw/plugin-sdk/test-state";
 import { expect, it } from "vitest";
 import { readMemoryDatabaseRevision } from "./manager-db-kernel.js";
+import { memoryAdmissionRestartEntrypoint } from "./manager-publication-admission-entrypoint.test-support.js";
 import type { MemoryPublicationConnection } from "./manager-publication-task.js";
 import { bindSqliteWorkerBackend } from "./manager-publication.worker.js";
 import { readMemoryConnectionPragmas, readMemoryShadowIdentity } from "./manager-shadow-task.js";
@@ -105,25 +108,16 @@ it.each(["clean", "unclean"])(
       if (shutdown === "unclean") {
         fs.unlinkSync(`${target.path}.seal`);
       }
-      const observed = observeHostDataSql();
-      try {
-        const reopened = openOpenClawAgentDatabase(options);
-        const integrityChecks = observed.queries.filter((sql) =>
-          /\bPRAGMA\s+integrity_check/iu.test(sql),
-        );
-        expect(integrityChecks.length > 0).toBe(shutdown === "unclean");
-        observed.queries.length = 0;
-        expect(ensureMemoryIndexSchema({ db: reopened.db, ...schema })).toEqual({
-          ftsAvailable: true,
-        });
-        const schemaSetup = observed.queries.filter((sql) =>
-          /\b(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|TRIGGER|VIRTUAL)\b/iu.test(sql),
-        );
-        expect(schemaSetup.length > 0).toBe(shutdown === "unclean");
-      } finally {
-        observed.restore();
-        await closeOpenClawAgentDatabasesAsync();
-      }
+      // Same-process reopen deliberately retains physical proof; only a new process tests the seal.
+      const { stdout } = await promisify(execFile)(process.execPath, [
+        ...resolveRuntimeWorkerArgv(resolveRuntimeWorkerUrl(memoryAdmissionRestartEntrypoint)),
+        target.path,
+      ]);
+      expect(JSON.parse(stdout)).toEqual({
+        integrityChecked: shutdown === "unclean",
+        schemaRebuilt: shutdown === "unclean",
+        ftsAvailable: true,
+      });
     });
   },
 );
