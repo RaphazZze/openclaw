@@ -10,6 +10,7 @@ import * as aggregation from "../infra/session-cost-usage-aggregation.js";
 import * as cacheRuntime from "../infra/session-cost-usage-cache-runtime.js";
 import { onSessionCostUsageUpdated } from "../infra/session-cost-usage-events.js";
 import { sessionChanges } from "../sessions/session-row-changes.js";
+import { buildUsageOverview } from "../shared/usage-overview.js";
 import type { SessionCostUsagePublication } from "../shared/usage-types.js";
 import {
   createAgentDatabaseInspectionRefusal,
@@ -70,28 +71,38 @@ it("coalesces usage publications and flushes committed totals for an immediate o
       getConfig: () => config,
       warn: vi.fn(),
     });
-    const overview = () =>
-      cacheRuntime.loadSessionCostOverviewFromCache({
-        config,
+    const sessions = [
+      {
+        key: target.sessionKey,
         agentId: target.agentId,
-        sessions: [
+        instances: [
           {
-            key: target.sessionKey,
-            agentId: target.agentId,
-            instances: [
-              {
-                sessionId: target.sessionId,
-                sessionFile: formatSqliteSessionFileMarker({
-                  ...target,
-                  storePath: resolveSessionStorePathForScope(target, config),
-                }),
-              },
-            ],
+            sessionId: target.sessionId,
+            sessionFile: formatSqliteSessionFileMarker({
+              ...target,
+              storePath: resolveSessionStorePathForScope(target, config),
+            }),
           },
         ],
-        options: {},
+      },
+    ];
+    const overview = async () => {
+      const cached = await cacheRuntime.loadSessionCostSummariesFromCache({
+        config,
+        agentId: target.agentId,
+        sessions: sessions.flatMap((session) => session.instances),
         requestRefresh: false,
       });
+      return {
+        ...buildUsageOverview({
+          sessions,
+          summaries: cached.summaries,
+          options: {},
+          dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
+        }),
+        cacheStatus: cached.cacheStatus,
+      };
+    };
     vi.useFakeTimers();
     try {
       await append("user");

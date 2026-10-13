@@ -8,6 +8,7 @@ import {
 } from "../config/sessions/session-actor-storage-binding.js";
 import { resolveMemorySessionTargetsInWorker } from "../config/sessions/session-transcript-inventory-runtime.js";
 import type { InternalSessionEntry } from "../config/sessions/types.js";
+import { buildUsageOverview } from "../shared/usage-overview.js";
 import { resolveIncognitoOpenClawAgentSqlitePath } from "../state/openclaw-agent-db.paths.js";
 import { runSessionActorUsage } from "./session-cost-usage-memory.js";
 import { resolveUsageCostPricingFingerprint } from "./session-cost-usage-pricing-context.js";
@@ -198,35 +199,39 @@ describe("actor memory usage", () => {
       kind: "refresh",
       changed: true,
     });
-    await expect(
-      runUsageCostWorker(prepared, {
-        kind: "sessions",
-        projection: "overview",
-        pricingFingerprint,
-        sessions: sessionFiles.map((sessionFile) => ({ sessionFile })),
-        dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
-        overview: {
-          sessions: [
-            { sessionKey, sessionId, sessionFile: first.sessionFile },
-            { ...secondTarget, sessionFile: second.sessionFile },
-          ].map((target) => ({
-            key: target.sessionKey,
-            sessionId: target.sessionId,
-            agentId: "main",
-            updatedAt: 10_000,
-            instances: [{ sessionId: target.sessionId, sessionFile: target.sessionFile }],
-          })),
-          options: { limit: 1 },
-        },
-      }),
-    ).resolves.toMatchObject({
-      kind: "overview",
-      result: {
-        totals: { totalTokens: 20, totalCost: 2 },
-        sessions: [{ usage: { totalTokens: 10, totalCost: 1 } }],
-        overview: { total: 2, selectedRowCount: 2, limit: 1 },
-      },
+    const cached = await runUsageCostWorker(prepared, {
+      kind: "sessions",
+      pricingFingerprint,
+      sessions: sessionFiles.map((sessionFile) => ({ sessionFile })),
+      dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
+    });
+    expect(cached).toMatchObject({
+      kind: "sessions",
       cacheStatus: { status: "fresh", cachedFiles: 2 },
+    });
+    if (cached.kind !== "sessions") {
+      throw new Error("Expected selected memory usage summaries");
+    }
+    expect(
+      buildUsageOverview({
+        sessions: [
+          { sessionKey, sessionId, sessionFile: first.sessionFile },
+          { ...secondTarget, sessionFile: second.sessionFile },
+        ].map((target) => ({
+          key: target.sessionKey,
+          sessionId: target.sessionId,
+          agentId: "main",
+          updatedAt: 10_000,
+          instances: [{ sessionId: target.sessionId, sessionFile: target.sessionFile }],
+        })),
+        options: { limit: 1 },
+        summaries: cached.summaries,
+        dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
+      }),
+    ).toMatchObject({
+      totals: { totalTokens: 20, totalCost: 2 },
+      sessions: [{ usage: { totalTokens: 10, totalCost: 1 } }],
+      overview: { total: 2, selectedRowCount: 2, limit: 1 },
     });
   });
 

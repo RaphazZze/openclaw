@@ -8,7 +8,6 @@ import type {
   SessionActorStorageBinding,
 } from "../config/sessions/session-actor-storage-binding.js";
 import { getAsyncWorkSignal } from "../shared/async-work-scope.js";
-import { buildUsageOverview } from "../shared/usage-overview.js";
 import type { SessionCostUsageRollupRow } from "./session-cost-usage-cache.kernel.js";
 import type { UsageCostResolver } from "./session-cost-usage-pricing.js";
 import {
@@ -218,19 +217,6 @@ async function runCapturedSessionActorUsage(
             };
       // This is the disclosure boundary; ordinary bookkeeping uses the captured immutable snapshot.
       binding.actor?.snapshot(binding.authority);
-      if (result.kind === "sessions" && operation.kind === "sessions" && operation.overview) {
-        return {
-          kind: "overview",
-          result: buildUsageOverview({
-            ...operation.overview,
-            summaries: result.summaries,
-            dayBucket: operation.dayBucket,
-          }),
-          cacheStatus: result.cacheStatus,
-          staleSessionFiles: result.staleSessionFiles,
-          invalidRows: [...invalidRows.values()],
-        };
-      }
       return { ...result, invalidRows: [...invalidRows.values()] };
     }
     if (!binding.actor) {

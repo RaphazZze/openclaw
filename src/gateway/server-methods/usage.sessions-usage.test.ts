@@ -7,7 +7,7 @@ import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createEmptyCostUsageTotals } from "../../infra/session-cost-usage-totals.js";
 import type { SessionCostSummary } from "../../infra/session-cost-usage.types.js";
-import { buildUsageOverview } from "../../shared/usage-overview.js";
+import { getAsyncWorkSignal } from "../../shared/async-work-scope.js";
 import type { SessionsUsageResult } from "../../shared/usage-types.js";
 import { withEnvAsync } from "../../test-utils/env.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
@@ -45,7 +45,6 @@ vi.mock("../../infra/session-cost-usage.js", async () => {
   return {
     ...actual,
     resolveUsageSessionSource: vi.fn(actual.resolveUsageSessionSource),
-    loadSessionCostOverviewFromCache: vi.fn(actual.loadSessionCostOverviewFromCache),
     discoverAllSessions: vi.fn(async ({ agentId }: { agentId?: string }) =>
       ["main", "opus"].includes(agentId ?? "")
         ? [
@@ -74,7 +73,6 @@ import { loadCombinedSessionStoreForGatewayCoreAsync } from "../../config/sessio
 import {
   discoverAllSessions,
   loadSessionCostSummariesFromCache,
-  loadSessionCostOverviewFromCache,
   loadSessionLogs,
   loadSessionUsageTimeSeries,
   resolveUsageSessionSource,
@@ -94,12 +92,14 @@ const BASE_USAGE_RANGE = { startDate: "2026-02-01", endDate: "2026-02-02", limit
 async function runSessionsUsageMethod(
   method: "sessions.usage" | "sessions.usage.timeseries" | "sessions.usage.logs",
   params: Record<string, unknown>,
+  options: { signal?: AbortSignal; respond?: ReturnType<typeof vi.fn> } = {},
 ) {
-  const respond = vi.fn();
+  const respond = options.respond ?? vi.fn();
   const handler = expectDefined(usageHandlers[method], "usage handler");
   await handler({
     respond,
     params,
+    signal: options.signal,
     context: { getRuntimeConfig: () => TEST_RUNTIME_CONFIG },
   } as unknown as Parameters<typeof handler>[0]);
   return respond;
@@ -160,7 +160,7 @@ describe("sessions.usage", () => {
   });
 
   it.each(["sharing", "configuration"])(
-    "withholds a report when %s changes during its worker read",
+    "keeps visible usage when unrelated %s changes during its worker read",
     async (change) => {
       const started = createDeferred();
       const released = createDeferred();
@@ -181,14 +181,64 @@ describe("sessions.usage", () => {
       }
       released.resolve();
       const respond = await pending;
-      expect(respond).toHaveBeenCalledExactlyOnceWith(
-        false,
-        undefined,
-        expect.objectContaining({
-          code: "UNAVAILABLE",
-          message: expect.stringContaining("Refresh"),
-        }),
+      expect(readResult(respond).totals.totalTokens).toBe(123);
+    },
+  );
+
+  it.each(["client cancellation", "time budget"] as const)(
+    "aborts usage work without publishing a report after %s",
+    async (cause) => {
+      const started = createDeferred<AbortSignal | undefined>();
+      const release = createDeferred();
+      const controller = new AbortController();
+      const respond = vi.fn();
+      if (cause === "time budget") {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      }
+      vi.mocked(loadSessionCostSummariesFromCache).mockImplementationOnce(async () => {
+        const signal = getAsyncWorkSignal();
+        const abort = () => release.resolve();
+        signal?.addEventListener("abort", abort, { once: true });
+        started.resolve(signal);
+        try {
+          await release.promise;
+          return {
+            summaries: [createEmptyCostUsageTotals()],
+            cacheStatus: { status: "fresh", cachedFiles: 1, pendingFiles: 0, staleFiles: 0 },
+          };
+        } finally {
+          signal?.removeEventListener("abort", abort);
+        }
+      });
+      const pending = runSessionsUsageMethod("sessions.usage", BASE_USAGE_RANGE, {
+        signal: controller.signal,
+        respond,
+      }).then(
+        () => undefined,
+        (error: unknown) => error,
       );
+      try {
+        const signal = expectDefined(await started.promise, "request-owned usage work signal");
+        expect(signal.aborted).toBe(false);
+        if (cause === "client cancellation") {
+          controller.abort(new Error("usage client disconnected"));
+        } else {
+          await vi.advanceTimersByTimeAsync(14_999);
+          expect(signal.aborted).toBe(false);
+          expect(respond).not.toHaveBeenCalled();
+          await vi.advanceTimersByTimeAsync(1);
+        }
+        expect(signal.aborted).toBe(true);
+        expect(await pending).toBe(signal.reason);
+        if (cause === "time budget") {
+          expect(signal.reason).toMatchObject({ message: expect.stringContaining("15-second") });
+        }
+        expect(respond).not.toHaveBeenCalled();
+      } finally {
+        release.resolve();
+        await pending;
+        vi.useRealTimers();
+      }
     },
   );
 
@@ -201,31 +251,23 @@ describe("sessions.usage", () => {
     vi.mocked(discoverAllSessions)
       .mockResolvedValueOnce(discovered)
       .mockResolvedValueOnce(discovered);
-    vi.mocked(loadSessionCostOverviewFromCache).mockImplementation(async (params) => ({
-      ...buildUsageOverview({
-        sessions: params.sessions,
-        summaries: params.sessions.flatMap((session) =>
-          session.instances.map(({ sessionId }) => ({
+    vi.mocked(loadSessionCostSummariesFromCache).mockImplementation(async (params) => ({
+      summaries: params.sessions.map(({ sessionId }) => ({
+        ...createEmptyCostUsageTotals(),
+        sessionId,
+        totalTokens: 7,
+        firstActivity: 1,
+        activityDates: ["2026-02-01"],
+        dailyBreakdown: [
+          {
             ...createEmptyCostUsageTotals(),
-            sessionId,
+            date: "2026-02-01",
             totalTokens: 7,
-            firstActivity: 1,
-            activityDates: ["2026-02-01"],
-            dailyBreakdown: [
-              {
-                ...createEmptyCostUsageTotals(),
-                date: "2026-02-01",
-                totalTokens: 7,
-                tokens: 7,
-                cost: 0,
-              },
-            ],
-          })),
-        ),
-        options: params.options,
-        dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
-        compact: params.projection === "overview",
-      }),
+            tokens: 7,
+            cost: 0,
+          },
+        ],
+      })),
       cacheStatus: {
         status: "fresh",
         cachedFiles: params.sessions.length,
@@ -263,7 +305,6 @@ describe("sessions.usage", () => {
     expect(exported.sessions).toHaveLength(1001);
     expect(exported.totals.totalTokens).toBe(7007);
     expect(exported.sessions[0]?.usage?.dailyBreakdown).toHaveLength(1);
-    expect(loadSessionCostSummariesFromCache).not.toHaveBeenCalled();
   });
 
   it("rejects all-agent scope with a specific agent or key", async () => {
@@ -276,6 +317,26 @@ describe("sessions.usage", () => {
       expect(respond.mock.calls[0]?.[0]).toBe(false);
     }
     expect(discoverAllSessions).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized usage selections before loading summaries", async () => {
+    vi.mocked(discoverAllSessions).mockResolvedValueOnce(
+      Array.from({ length: 20_001 }, (_, index) => ({
+        sessionId: `budget-${index}`,
+        sessionFile: `/tmp/budget-${index}.jsonl`,
+        mtime: index + 1,
+      })),
+    );
+    const respond = await runSessionsUsage(BASE_USAGE_RANGE);
+    expect(respond).toHaveBeenCalledExactlyOnceWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        code: "INVALID_REQUEST",
+        message: expect.stringContaining("20,000"),
+      }),
+    );
+    expect(loadSessionCostSummariesFromCache).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -555,6 +616,32 @@ describe("sessions.usage", () => {
     ]);
     expect(result.totals.totalTokens).toBe(60);
     expect(result.totals.totalCost).toBeCloseTo(0.06);
+
+    TEST_RUNTIME_CONFIG = { ...TEST_RUNTIME_CONFIG };
+    const partialEntry = { ...entry, usageFamilySessionIds: ["current", "old"] };
+    mockStoredSession(storeKey, partialEntry);
+    mockCombinedStore({ [storeKey]: partialEntry }, [[storeKey, "opus"]]);
+    vi.mocked(discoverAllSessions).mockResolvedValueOnce([
+      { sessionId: "old", sessionFile: oldSessionFile, mtime: 1_000 },
+    ]);
+    vi.mocked(loadSessionCostSummariesFromCache).mockImplementationOnce(async ({ sessions }) => ({
+      summaries: sessions.map(({ sessionId }) =>
+        sessionId === "old" ? null : { ...createEmptyCostUsageTotals(), totalTokens: 20 },
+      ),
+      cacheStatus: { status: "partial", cachedFiles: 1, pendingFiles: 1, staleFiles: 0 },
+    }));
+    const partial = readResult(
+      await runSessionsUsage({
+        ...BASE_USAGE_RANGE,
+        key: storeKey,
+        groupBy: "family",
+        includeHistorical: true,
+      }),
+    );
+    expect(partial.sessions).toMatchObject([
+      { key: storeKey, computing: true, usage: { totalTokens: 20 } },
+    ]);
+    expect(partial.totals.totalTokens).toBe(20);
   });
 
   it("prefers the deterministic store key when duplicate sessionIds exist", async () => {

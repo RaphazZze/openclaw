@@ -30,7 +30,8 @@ export type UsageCostRollupRowSource = {
   readRow: (filePath: string) => SessionCostUsageRollupRow | undefined;
   readBody: (row: SessionCostUsageRollupRow) => Uint8Array | null | Promise<Uint8Array | null>;
   onInvalidBody: (key: string) => void;
-  readEntry?: (row: SessionCostUsageRollupRow) => Promise<UsageCostRollupEntry | undefined>;
+  /** Null defers a valid row whose exact projection exceeded the report budget. */
+  readEntry?: (row: SessionCostUsageRollupRow) => Promise<UsageCostRollupEntry | null | undefined>;
   /** Snapshot rows whose keys are absent from the resolved files. */
   remainingRows: Iterable<SessionCostUsageRollupRow>;
 };
@@ -163,7 +164,7 @@ function createRollupProjectionReader(
                 await params.readBody(row),
               )
           : undefined;
-      const invalidBody = Boolean(row && usable.length > 0 && !entry);
+      const invalidBody = Boolean(row && usable.length > 0 && entry === undefined);
       if (invalidBody && row) {
         params.onInvalidBody(row.key);
       }
@@ -196,7 +197,7 @@ export async function projectCostUsageSummary(
   // Keep file order and per-bucket additions: folding per-file totals changes rounding.
   for (const file of params.files) {
     const { fresh, entry, invalidBody } = await reader.read(file.filePath, [{ file }], file);
-    if (!fresh || invalidBody) {
+    if (!fresh || invalidBody || !entry) {
       staleFiles += 1;
     }
     if (!entry) {

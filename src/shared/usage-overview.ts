@@ -246,6 +246,51 @@ function compactSession(session: SessionUsageEntry, days: ReadonlySet<string>): 
   return { ...session, usage };
 }
 
+function selectUsageOverviewSessions(
+  sessions: SessionUsageEntry[],
+  options: UsageOverviewOptions,
+  calendar: Calendar,
+) {
+  const days = new Set(options.selectedDays);
+  const hours = new Set(options.selectedHours);
+  const queried = filterSessionsByQuery(
+    sessions.filter((session) => touchesHours(session, hours, calendar)),
+    options.query ?? "",
+  );
+  const matched = queried.sessions.filter(
+    (session) =>
+      !days.size ||
+      (session.usage?.activityDates?.length
+        ? session.usage.activityDates.some((day) => days.has(day))
+        : Boolean(session.updatedAt && days.has(calendar.at(session.updatedAt).date))),
+  );
+  const selected = new Set(options.selectedSessions);
+  const scoped = selected.size ? matched.filter((session) => selected.has(session.key)) : matched;
+  const recent = options.recentKeys === undefined ? undefined : new Set(options.recentKeys);
+  const roster = recent ? matched.filter((session) => recent.has(session.key)) : matched;
+  return { days, queried, matched, selected, scoped, roster };
+}
+
+function usageOverviewPage(roster: SessionUsageEntry[], options: UsageOverviewOptions) {
+  return roster
+    .toSorted(compareUsageOverviewSessions(options))
+    .slice(options.offset ?? 0, (options.offset ?? 0) + (options.limit ?? PAGE_SIZE));
+}
+
+/** Selects rows for context hydration without calculating the full report twice. */
+export function selectUsageOverviewPage(params: {
+  rows: SessionUsageEntry[];
+  options: UsageOverviewOptions;
+  dayBucket: UsageDailyBucket;
+}): SessionUsageEntry[] {
+  const { roster } = selectUsageOverviewSessions(
+    params.rows,
+    params.options,
+    createCalendar(params.dayBucket),
+  );
+  return usageOverviewPage(roster, params.options);
+}
+
 export function buildUsageOverview(
   params: (
     | { sessions: UsageOverviewSession[]; summaries: Array<SessionCostSummary | null> }
@@ -324,28 +369,16 @@ export function buildUsageOverview(
       filters.tool.add(tool.name);
     }
   }
-  const days = new Set(options.selectedDays);
-  const hours = new Set(options.selectedHours);
-  const queried = filterSessionsByQuery(
-    sessions.filter((session) => touchesHours(session, hours, calendar)),
-    options.query ?? "",
+  const { days, queried, matched, selected, scoped, roster } = selectUsageOverviewSessions(
+    sessions,
+    options,
+    calendar,
   );
-  const matched = queried.sessions.filter(
-    (session) =>
-      !days.size ||
-      (session.usage?.activityDates?.length
-        ? session.usage.activityDates.some((day) => days.has(day))
-        : Boolean(session.updatedAt && days.has(calendar.at(session.updatedAt).date))),
-  );
-  const selected = new Set(options.selectedSessions);
-  const scoped = selected.size ? matched.filter((session) => selected.has(session.key)) : matched;
   const selectedRows = new Map(
     selected.size ? scoped.map((session) => [session.key, session]) : [],
   );
   const toRow = (session: SessionUsageEntry) =>
     params.compact === false ? session : compactSession(session, days);
-  const recent = options.recentKeys === undefined ? undefined : new Set(options.recentKeys);
-  const roster = recent ? matched.filter((session) => recent.has(session.key)) : matched;
   const accumulator = createUsageAggregateAccumulator();
   const overview: SessionsUsageOverview = {
     total: roster.length,
@@ -476,10 +509,7 @@ export function buildUsageOverview(
     }
   }
   return {
-    sessions: roster
-      .toSorted(compareUsageOverviewSessions(options))
-      .slice(options.offset ?? 0, (options.offset ?? 0) + (options.limit ?? PAGE_SIZE))
-      .map(toRow),
+    sessions: usageOverviewPage(roster, options).map(toRow),
     totals,
     aggregates,
     overview,

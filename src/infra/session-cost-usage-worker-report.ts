@@ -31,16 +31,19 @@ export async function readUsageCostReportEntry(params: {
   startMs?: number;
   endMs?: number;
   dayBucket: UsageDailyBucket;
-  overview: boolean;
   scan: RollupScan;
-}): Promise<UsageCostRollupEntry | undefined> {
+  throwIfCancelled: () => void;
+  replayBudget: { remainingBytes: number; deadline: number };
+}): Promise<UsageCostRollupEntry | null | undefined> {
   const { row, file, scan } = params;
+  params.throwIfCancelled();
   const cached = decodeUsageCostRollup(
     row.valueJson,
     scan.pricingFingerprint,
     await params.body(row),
   );
   const envelope = decodeUsageCostRollupEnvelope(row.valueJson, scan.pricingFingerprint);
+  params.throwIfCancelled();
   if (!cached || !envelope?.projection) {
     return cached;
   }
@@ -49,12 +52,14 @@ export async function readUsageCostReportEntry(params: {
   }
   const startMs = params.startMs ?? Number.NEGATIVE_INFINITY;
   const endMs = params.endMs ?? Number.POSITIVE_INFINITY;
-  // Exact partial boundaries and legacy callers retain canonical addition order.
+  // Exact partial boundaries need individual timestamps. Aligned reports use the
+  // committed aggregates; regrouping floating costs may change their final bit.
   const aligned =
     (!Number.isFinite(startMs) || startMs % USAGE_COST_QUARTER_MS === 0) &&
     (!Number.isFinite(endMs) || (endMs + 1) % USAGE_COST_QUARTER_MS === 0);
-  if (params.overview && aligned && !envelope.projection.canonicalNumbers) {
+  if (aligned) {
     const selected = await params.partitions(row.key, startMs, endMs);
+    params.throwIfCancelled();
     const startMonth = Number.isFinite(startMs)
       ? `${new Date(startMs).toISOString().slice(0, 7)}-01`
       : "";
@@ -70,6 +75,7 @@ export async function readUsageCostReportEntry(params: {
     const rollup = createSessionUsageRollupData();
     rollup.untimestamped = cached.rollup.untimestamped;
     for (const partition of selected) {
+      params.throwIfCancelled();
       const day = decodeUsageCostPartition(partition.valueJson, partition.blob);
       if (!day) {
         return undefined;
@@ -102,15 +108,43 @@ export async function readUsageCostReportEntry(params: {
           mtimeMs: checkpoint.mtimeMs,
         }
       : { ...file, size: checkpoint.observedSize, mtimeMs: checkpoint.observedMtimeMs };
-  const canonical = await scanUsageCostRollupInWorker({ ...scan, file: snapshotFile }).catch(
-    (error: unknown) => {
-      if (error instanceof UsageCostHostEffectError || error instanceof WorkerTaskError) {
-        throw error;
-      }
-      // Omit failed replays so the report stays partial without publishing incomplete usage.
-      return undefined;
+  const budget = params.replayBudget;
+  if (snapshotFile.size > budget.remainingBytes || performance.now() >= budget.deadline) {
+    return null;
+  }
+  budget.remainingBytes -= snapshotFile.size;
+  const exhausted = new Error("Usage report replay budget exhausted");
+  const checkProgress = () => {
+    params.throwIfCancelled();
+    if (performance.now() >= budget.deadline) {
+      throw exhausted;
+    }
+  };
+  const canonical = await scanUsageCostRollupInWorker({
+    ...scan,
+    file: snapshotFile,
+    checkProgress,
+    resolveCosts: async (pairs) => {
+      checkProgress();
+      const costs = await scan.resolveCosts(pairs);
+      checkProgress();
+      return costs;
     },
-  );
+  }).catch((error: unknown) => {
+    params.throwIfCancelled();
+    if (error === exhausted) {
+      return null;
+    }
+    if (error instanceof UsageCostHostEffectError || error instanceof WorkerTaskError) {
+      throw error;
+    }
+    // Omit failed replays so the report stays partial without publishing incomplete usage.
+    return undefined;
+  });
+  params.throwIfCancelled();
+  if (canonical === null) {
+    return null;
+  }
   if (!canonical || canonical.checkpoint.anchorHash !== checkpoint.anchorHash) {
     return undefined;
   }

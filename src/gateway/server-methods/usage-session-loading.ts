@@ -97,7 +97,6 @@ export async function loadUsageSessionSummaries(params: {
   endMs: number;
   includeUntimestamped?: boolean;
   dayBucket?: UsageDailyBucket;
-  projection?: "overview";
 }) {
   const {
     entries: mergedEntries,
@@ -112,6 +111,8 @@ export async function loadUsageSessionSummaries(params: {
     { length: mergedEntries.length },
     () => null,
   );
+
+  const computing = Array<boolean>(mergedEntries.length).fill(false);
 
   // Batch all included instances by agent so cache reads do not scale with the row limit.
   const sessionsByAgent = new Map<
@@ -141,7 +142,6 @@ export async function loadUsageSessionSummaries(params: {
         endMs,
         includeUntimestamped,
         dayBucket,
-        projection: params.projection,
       }),
     })),
   );
@@ -150,15 +150,23 @@ export async function loadUsageSessionSummaries(params: {
     let usage: ReturnType<typeof createSessionCostSummaryAccumulator> | undefined;
     for (const [index, summary] of loaded.summaries.entries()) {
       const session = expectDefined(agentSessions[index], "agent sessions entry at index");
+      if (!summary) {
+        computing[session.entryIndex] = true;
+      }
       if (summary) {
         const merged = expectDefined(
           mergedEntries[session.entryIndex],
           "merged entries entry at session.entry index",
         );
-        usage ??= createSessionCostSummaryAccumulator({
+        const identity = {
           sessionId: merged.sessionId ?? merged.instances[0]?.sessionId,
           sessionFile: merged.sessionFile ?? merged.instances[0]?.sessionFile,
-        });
+        };
+        if (merged.instances.length === 1) {
+          usageByEntryIndex[session.entryIndex] = { ...summary, ...identity };
+          continue;
+        }
+        usage ??= createSessionCostSummaryAccumulator(identity);
         usage.add(summary);
       }
       // Construction above keeps each family's instances contiguous within its agent batch.
@@ -169,5 +177,5 @@ export async function loadUsageSessionSummaries(params: {
     }
   }
 
-  return { summaries: usageByEntryIndex, cacheStatus };
+  return { summaries: usageByEntryIndex, computing, cacheStatus };
 }

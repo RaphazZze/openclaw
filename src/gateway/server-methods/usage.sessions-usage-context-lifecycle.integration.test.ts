@@ -126,19 +126,39 @@ it.for([
         visibility: "shared",
         systemPromptReport: originalReport,
       });
-      await persistSessionTranscriptTurn(
-        { ...scope, sessionId },
-        {
+      const sibling = {
+        ...scope,
+        sessionKey: "agent:main:usage-unaffected",
+        sessionId: "usage-unaffected",
+      };
+      replaceSessionEntrySync(sibling, {
+        sessionId: sibling.sessionId,
+        updatedAt: timestamp - 1,
+        createdActor: { type: "human", source: "profile", id: viewer.id },
+        visibility: "shared",
+      });
+      for (const [target, tokens] of [
+        [{ ...scope, sessionId }, 17],
+        [sibling, 23],
+      ] as const) {
+        await persistSessionTranscriptTurn(target, {
           cwd: state.workspaceDir,
           updateMode: "none",
           messages: [
             {
-              message: { role: "user", content: "Synthetic usage", timestamp },
+              message: {
+                role: "assistant",
+                content: "Synthetic usage",
+                timestamp,
+                provider: "synthetic",
+                model: "synthetic",
+                usage: { input: tokens, output: 0, totalTokens: tokens, cost: { total: 0 } },
+              },
               now: timestamp,
             },
           ],
-        },
-      );
+        });
+      }
       await sessionCostUsage.loadCostUsageSummary({
         config,
         agentId: scope.agentId,
@@ -190,7 +210,7 @@ it.for([
           params: {
             agentId: "main",
             range: "all",
-            limit: 1,
+            limit: 2,
             includeContextWeight: true,
             ...(change === "revocation during target read" ? { key: scope.sessionKey } : {}),
           },
@@ -210,7 +230,7 @@ it.for([
       ]);
       if (loaded) {
         expect(loaded.cacheStatus.status).toBe("fresh");
-        expect(loaded.summaries).toHaveLength(1);
+        expect(loaded.summaries).toHaveLength(2);
       }
       expect(respond).not.toHaveBeenCalled();
       signal.throwIfAborted();
@@ -262,25 +282,24 @@ it.for([
         ]);
         return;
       }
-      const [ok, payload, error] = expectDefined(respond.mock.calls[0], "usage response");
-      if (change === "revocation after context read") {
-        expect(ok).toBe(false);
-        expect(payload).toBeUndefined();
-        expect(error).toMatchObject({
-          code: "UNAVAILABLE",
-          message: expect.stringContaining("Refresh the usage view"),
-        });
-        return;
-      }
+      const [ok, payload] = expectDefined(respond.mock.calls[0], "usage response");
       expect(ok).toBe(true);
       const result = payload as SessionsUsageResult;
-      expect(result.sessions).toHaveLength(1);
-      expect(result.sessions[0]).toMatchObject({
-        key: scope.sessionKey,
-        sessionId,
-        hasContextWeight: false,
-        contextWeight: null,
-      });
+      expect(result.sessions.map((row) => row.key)).toEqual(
+        change === "session reset" ? [scope.sessionKey, sibling.sessionKey] : [sibling.sessionKey],
+      );
+      expect(result.totals.totalTokens).toBe(change === "session reset" ? 40 : 23);
+      expect(
+        result.sessions.find((row) => row.key === sibling.sessionKey)?.usage?.totalTokens,
+      ).toBe(23);
+      if (change === "session reset") {
+        expect(result.sessions[0]).toMatchObject({
+          key: scope.sessionKey,
+          sessionId,
+          hasContextWeight: false,
+          contextWeight: null,
+        });
+      }
     } finally {
       await cleanup();
     }

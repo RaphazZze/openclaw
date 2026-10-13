@@ -3,7 +3,6 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { getAsyncWorkSignal, trackAsyncWork } from "../shared/async-work-scope.js";
-import type { UsageOverviewOptions, UsageOverviewSession } from "../shared/usage-types.js";
 import { getAgentDeletionDatabaseCleanup } from "../state/agent-deletion-cleanup.js";
 import { resolveOpenClawAgentSqlitePath } from "../state/openclaw-agent-db.js";
 import { isAbortError } from "./abort-signal.js";
@@ -67,6 +66,8 @@ function isUsageCostRefreshQueued(databasePath: string): boolean {
 }
 
 async function flushPendingUsageCostRefresh(prepared: PreparedUsageCostWorker): Promise<void> {
+  const signal = getAsyncWorkSignal();
+  signal?.throwIfAborted();
   const key = prepared.location.databasePath;
   const pending: Promise<void>[] = [];
   for (const refreshes of usageCostRefreshes.values()) {
@@ -77,7 +78,24 @@ async function flushPendingUsageCostRefresh(prepared: PreparedUsageCostWorker): 
       pending.push(state.completion);
     }
   }
-  await Promise.all(pending);
+  if (pending.length === 0) {
+    return;
+  }
+  // Refresh remains owned by its publication scope. Slow batches serve the last
+  // committed projection instead of making the report wait for the entire queue.
+  const waiting = new AbortController();
+  const stopWaiting = () => waiting.abort();
+  signal?.addEventListener("abort", stopWaiting, { once: true });
+  try {
+    await Promise.race([
+      Promise.all(pending),
+      waitForUsageCostRefresh(waiting.signal, USAGE_COST_PUBLICATION_DEBOUNCE_MS),
+    ]);
+    signal?.throwIfAborted();
+  } finally {
+    signal?.removeEventListener("abort", stopWaiting);
+    stopWaiting();
+  }
 }
 
 export async function loadCostUsageSummary(params: {
@@ -176,7 +194,6 @@ type SessionCostReadParams = {
   agentId: string;
   startMs?: number;
   endMs?: number;
-  projection?: "overview";
   includeUntimestamped?: boolean;
   dayBucket?: UsageDailyBucket;
   requestRefresh?: boolean;
@@ -192,38 +209,7 @@ export async function loadSessionCostSummariesFromCache(
   return { summaries: result.summaries, cacheStatus: result.cacheStatus };
 }
 
-export async function loadSessionCostOverviewFromCache(
-  params: Omit<SessionCostReadParams, "sessions" | "projection"> & {
-    sessions: UsageOverviewSession[];
-    options: UsageOverviewOptions;
-    projection?: "overview";
-  },
-) {
-  const result = await loadSessionCostResultFromCache({
-    ...params,
-    sessions: params.sessions.flatMap((session) => session.instances),
-    projection: params.projection,
-    overview: {
-      sessions: params.sessions,
-      options: params.options,
-      compact: params.projection === "overview",
-    },
-  });
-  if (result.kind !== "overview") {
-    throw new Error("Usage worker returned an invalid overview");
-  }
-  return { ...result.result, cacheStatus: result.cacheStatus };
-}
-
-function loadSessionCostResultFromCache(
-  params: SessionCostReadParams & {
-    overview?: {
-      sessions: UsageOverviewSession[];
-      options: UsageOverviewOptions;
-      compact?: boolean;
-    };
-  },
-) {
+function loadSessionCostResultFromCache(params: SessionCostReadParams) {
   const prepared = prepareUsageCostWorker({
     ...params,
     sessionFiles: params.sessions.map((session) => session.sessionFile),
@@ -232,15 +218,9 @@ function loadSessionCostResultFromCache(
 }
 
 async function loadCapturedSessionCostSummariesFromCache(
-  params: SessionCostReadParams & {
-    overview?: {
-      sessions: UsageOverviewSession[];
-      options: UsageOverviewOptions;
-      compact?: boolean;
-    };
-  },
+  params: SessionCostReadParams,
   prepared: PreparedUsageCostWorker,
-): Promise<Extract<UsageCostWorkerResult, { kind: "sessions" | "overview" }>> {
+): Promise<Extract<UsageCostWorkerResult, { kind: "sessions" }>> {
   const { databasePath, storePath } = prepared.location;
   await flushPendingUsageCostRefresh(prepared);
   const pricingFingerprint = await resolveUsageCostPricingFingerprint(
@@ -249,8 +229,6 @@ async function loadCapturedSessionCostSummariesFromCache(
   );
   const result = await runUsageCostWorker(prepared, {
     kind: "sessions",
-    projection: params.projection,
-    overview: params.overview,
     pricingFingerprint,
     sessions: params.sessions,
     startMs: params.startMs,
@@ -258,7 +236,7 @@ async function loadCapturedSessionCostSummariesFromCache(
     includeUntimestamped: params.includeUntimestamped,
     dayBucket: resolveUsageCostWorkerDayBucket(params.dayBucket),
   });
-  if (result.kind !== "sessions" && result.kind !== "overview") {
+  if (result.kind !== "sessions") {
     throw new Error("Usage worker returned an invalid session summary");
   }
   const { cacheStatus, staleSessionFiles } = result;
@@ -283,9 +261,7 @@ async function loadCapturedSessionCostSummariesFromCache(
         : await isSessionCostUsageRefreshRunning(params.agentId, databasePath)))
   ) {
     cacheStatus.status = "refreshing";
-    for (const summary of result.kind === "sessions"
-      ? result.summaries
-      : result.result.sessions.map((session) => session.usage)) {
+    for (const summary of result.summaries) {
       if (summary?.staleSince !== undefined) {
         summary.refreshing = true;
       }

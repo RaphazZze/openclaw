@@ -601,8 +601,7 @@ if (!isMainThread) {
         (await probe.read()).flatMap((entry) =>
           entry.kind === "transcript" && entry.method === "createReadStream" ? [entry.start] : [],
         ),
-        // Refresh advances the checkpoint; exact legacy detail then replays canonical records.
-      ).toEqual([initialEntry.checkpoint.parsedOffset, 0]);
+      ).toEqual([initialEntry.checkpoint.parsedOffset]);
 
       const completeSize = (await fs.stat(sessionFile)).size;
       await fs.appendFile(sessionFile, '\n{"type":"message","timestamp":"2026-02-05', "utf-8");
@@ -634,7 +633,7 @@ if (!isMainThread) {
         (await probe.read()).flatMap((entry) =>
           entry.kind === "transcript" && entry.method === "createReadStream" ? [entry.start] : [],
         ),
-      ).toEqual([0, 0]);
+      ).toEqual([0]);
       const rebuiltRow = requireValue(
         readSessionCostUsageRollupRows("main").find((row) => row.key === sessionFile),
         "expected rebuilt rollup",
@@ -743,7 +742,6 @@ if (!isMainThread) {
         startMs: Date.UTC(2026, 1, 5),
         endMs: Date.UTC(2026, 1, 5) + 24 * 60 * 60 * 1000 - 1,
         dayBucket: { mode: "time-zone", timeZone: "Europe/Vienna" },
-        projection: "overview",
         requestRefresh: false,
       });
 
@@ -770,7 +768,7 @@ if (!isMainThread) {
   });
 });
 
-it("keeps model addition order when integer timestamp totals hide fractional model costs", async () => {
+it("uses committed aggregates for fractional model costs without replaying transcripts", async () => {
   await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
     const config = {};
     const agentId = "usage-model-rounding";
@@ -804,16 +802,67 @@ it("keeps model addition order when integer timestamp totals hide fractional mod
       endMs: Date.UTC(2026, 8, 18, 0, 29, 59, 999),
       dayBucket: { mode: "utc-offset" as const, utcOffsetMinutes: 0 },
     };
-    const canonical = await loadSessionCostSummariesFromCache(request);
-    const overview = await loadSessionCostSummariesFromCache({
-      ...request,
-      projection: "overview",
+    const probe = await observeUsageWorkerReads(state.stateDir, [sessionFile]);
+    await probe.run(async () => {
+      const cached = await loadSessionCostSummariesFromCache(request);
+      expect(cached.cacheStatus.status).toBe("fresh");
+      expect(cached.summaries[0]?.totalTokens).toBe(6);
+      expect(cached.summaries[0]?.totalCost).toBe(3);
+      const model = cached.summaries[0]?.modelUsage?.find((entry) => entry.model === "model-0");
+      expect(model?.totals.totalCost).toBeCloseTo(0.6, 12);
+      expect((await probe.read()).filter((entry) => entry.kind === "transcript")).toEqual([]);
     });
-    expect(overview.cacheStatus.status).toBe("fresh");
-    expect(overview.summaries[0]?.totalCost).toBe(3);
-    expect(overview.summaries[0]?.modelUsage).toEqual(canonical.summaries[0]?.modelUsage);
-    const model = overview.summaries[0]?.modelUsage?.find((entry) => entry.model === "model-0");
-    expect(model?.totals.totalCost).toBe(0.6000000000000001);
+  });
+});
+
+it("defers oversized exact ranges without treating valid aggregates as corrupt", async () => {
+  await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+    const agentId = "usage-replay-budget";
+    const sessionFile = state.path("usage-replay-budget.jsonl");
+    const timestamp = Date.UTC(2026, 8, 18, 0, 1);
+    await fs.writeFile(
+      sessionFile,
+      JSON.stringify({
+        type: "message",
+        timestamp: new Date(timestamp).toISOString(),
+        message: {
+          role: "assistant",
+          content: "x".repeat(16 * 1024 * 1024),
+          usage: { input: 7, output: 0, totalTokens: 7, cost: { total: 0.1 } },
+        },
+      }) + "\n",
+    );
+    await refreshCostUsageCacheForAgent({ config: {}, agentId, sessionFiles: [sessionFile] });
+    const probe = await observeUsageWorkerReads(state.stateDir, [sessionFile]);
+    await probe.run(async () => {
+      const prepared = prepareUsageCostWorker({ agentId, sessionFiles: [sessionFile] });
+      const rows = readSessionCostUsageRollupRows(agentId);
+      const pricingFingerprint = JSON.parse(rows[0]!.valueJson).pricingFingerprint as string;
+      const exact = await runUsageCostWorker(prepared, {
+        kind: "sessions",
+        sessions: [{ sessionFile }],
+        pricingFingerprint,
+        startMs: timestamp,
+        endMs: timestamp + 1,
+        dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
+      });
+      expect(exact).toMatchObject({
+        kind: "sessions",
+        summaries: [null],
+        cacheStatus: { status: "stale", cachedFiles: 0, pendingFiles: 1 },
+        invalidRows: [],
+      });
+      expect((await probe.read()).filter((entry) => entry.kind === "transcript")).toEqual([]);
+      const aligned = await loadSessionCostSummariesFromCache({
+        agentId,
+        sessions: [{ sessionFile }],
+        requestRefresh: false,
+      });
+      expect(aligned).toMatchObject({
+        summaries: [{ totalTokens: 7 }],
+        cacheStatus: { status: "fresh" },
+      });
+    });
   });
 });
 
@@ -875,7 +924,6 @@ it("replaces every monthly partition after cache damage and filters within and a
           config,
           agentId,
           sessions: [{ sessionFile }],
-          projection: "overview",
           requestRefresh: false,
           startMs,
           endMs,

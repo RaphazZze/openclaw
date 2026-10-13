@@ -10,9 +10,9 @@ import {
   getSessionKysely,
   resolveSqliteReadScope,
   toDatabaseOptions,
+  type SessionSqliteTargetResolutionCache,
 } from "../config/sessions/session-accessor.sqlite-scope.js";
 import { transcriptEventJsonSql } from "../config/sessions/transcript-payload.js";
-import { buildUsageOverview } from "../shared/usage-overview.js";
 import {
   openOpenClawAgentDatabaseReadOnly,
   withOpenClawAgentDatabaseReadOnly,
@@ -103,8 +103,11 @@ export async function executeUsageCostWorker(
     // SAFETY: Channel request IDs pair this value with the host dispatch for the requested kind.
     return reply.value as UsageCostWorkerHostEffects[Kind]["output"];
   };
+  const targetCache: SessionSqliteTargetResolutionCache = new Map();
   const target = (agentId: string, storePath: string) => {
-    const options = toDatabaseOptions(resolveSqliteReadScope({ agentId, storePath, env }));
+    const options = toDatabaseOptions(
+      resolveSqliteReadScope({ agentId, storePath, env }, targetCache),
+    );
     const owned = input.databases.find(
       (entry) => entry.agentId === options.agentId && entry.path === options.path,
     );
@@ -295,6 +298,8 @@ export async function executeUsageCostWorker(
     return stored.map((row) => ({ seq: row.seq, event: JSON.parse(row.event_json) as unknown }));
   };
   if (operation.kind === "summary" || operation.kind === "sessions") {
+    // Exact sub-quarter/day-crossing requests share one bounded replay allowance.
+    const replayBudget = { remainingBytes: 16 * 1024 * 1024, deadline: performance.now() + 5_000 };
     const project = async (
       rows: SessionCostUsageRollupRow[],
       body: (row: SessionCostUsageRollupRow) => Uint8Array | null | Promise<Uint8Array | null>,
@@ -337,7 +342,8 @@ export async function executeUsageCostWorker(
             startMs: operation.startMs,
             endMs: operation.endMs,
             dayBucket: operation.dayBucket,
-            overview: operation.kind === "sessions" && operation.projection === "overview",
+            throwIfCancelled: control.throwIfCancelled,
+            replayBudget,
             scan: {
               pricingFingerprint: operation.pricingFingerprint,
               resolveCosts,
@@ -378,19 +384,6 @@ export async function executeUsageCostWorker(
               })),
             };
       control.throwIfCancelled();
-      if (result.kind === "sessions" && operation.kind === "sessions" && operation.overview) {
-        return {
-          kind: "overview",
-          result: buildUsageOverview({
-            ...operation.overview,
-            summaries: result.summaries,
-            dayBucket: operation.dayBucket,
-          }),
-          cacheStatus: result.cacheStatus,
-          staleSessionFiles: result.staleSessionFiles,
-          invalidRows: [...invalidRows.values()],
-        };
-      }
       return { ...result, invalidRows: [...invalidRows.values()] };
     };
     try {
@@ -406,6 +399,7 @@ export async function executeUsageCostWorker(
           return await project(
             readSessionCostUsageRollupRowsInDatabase(db, selectedPaths),
             (row) => {
+              control.throwIfCancelled();
               const body = readSessionCostUsageRollupBodyInDatabase(db, row);
               if (!body) {
                 throw new WorkerTaskError("Usage cache snapshot is unavailable", "unavailable");
@@ -537,11 +531,9 @@ export async function executeUsageCostWorker(
             resolveCosts,
             readGeneration,
             readRows,
+            checkProgress: control.throwIfCancelled,
           });
-    const { valueJson, blob, partitions } = partitionUsageCostRollup(
-      entry,
-      previous !== undefined && envelope?.projection?.canonicalNumbers === true,
-    );
+    const { valueJson, blob, partitions } = partitionUsageCostRollup(entry);
     const replacePartitions = previous === undefined || !envelope?.projection;
     const previousPartitions = new Map(
       priorPartitions.map((partition) => [partition.date, partition.valueJson]),
