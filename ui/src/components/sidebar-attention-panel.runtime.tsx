@@ -334,7 +334,7 @@ export function SidebarAttentionPanel(props: SidebarAttentionPanelParams) {
             active={props.selectedTab}
             ariaLabel={t("attention.tabs.label")}
             panelId="sidebar-issues-tabpanel"
-            {...{ className: "sidebar-issues-panel__tabs" }}
+            class="sidebar-issues-panel__tabs"
             variant="sub"
             tabs={ISSUE_TABS.map((tab) => ({
               value: tab,

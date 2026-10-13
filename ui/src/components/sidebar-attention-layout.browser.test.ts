@@ -346,7 +346,7 @@ describe.runIf("__vitest_browser__" in globalThis)("Inbox panel layout", () => {
             active: "tab-0",
             ariaLabel: "Inbox categories",
             panelId: "inbox-fixture-panel",
-            className: "sidebar-issues-panel__tabs",
+            class: "sidebar-issues-panel__tabs",
             variant: "sub",
             tabs: ["All", "Approvals", "Mentions", "Automations", "System"].map((label, index) => ({
               value: `tab-${index}`,
