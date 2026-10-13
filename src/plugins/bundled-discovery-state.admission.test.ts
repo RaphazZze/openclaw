@@ -16,7 +16,6 @@ import { readPluginMetadataStateRow } from "./plugin-metadata-state-worker.js";
 const reads = vi.hoisted(() => ({
   snapshot: vi.fn<() => object | undefined>(),
   mode: vi.fn<() => unknown>(),
-  asyncMode: vi.fn<() => Promise<unknown>>(),
   metadata: vi.fn(),
 }));
 
@@ -28,10 +27,6 @@ vi.mock("../state/openclaw-state-db-readonly.js", async (importOriginal) => ({
   withArtifactPreservingStateReads: <T>(read: () => T): T => read(),
 }));
 vi.mock("../state/config-machine-state.js", () => ({ readConfigMachineState: reads.mode }));
-vi.mock("../state/config-machine-state-async.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../state/config-machine-state-async.js")>()),
-  readConfigMachineStateAsync: reads.asyncMode,
-}));
 
 const env = { OPENCLAW_STATE_DIR: "/synthetic/plugin-admission" };
 
@@ -39,7 +34,6 @@ beforeEach(() => {
   vi.resetAllMocks();
   reads.snapshot.mockReturnValue({});
   reads.mode.mockReturnValue("allowlist");
-  reads.asyncMode.mockResolvedValue("allowlist");
   reads.metadata.mockResolvedValue({
     ok: true,
     type: "plugins.metadata.read",
@@ -65,7 +59,7 @@ const readers = [
   },
   {
     name: "asynchronous discovery snapshot row",
-    reject: reads.asyncMode,
+    reject: reads.metadata,
     read: () => prepareBundledDiscoveryMode(env),
   },
   {
@@ -131,7 +125,7 @@ it("prepares snapshot policy asynchronously and reuses it for synchronous deriva
     activate();
     expect(readBundledDiscoveryModeMemoized(env)).toBe("allowlist");
     await prepareBundledDiscoveryMode(env);
-    expect(reads.asyncMode).toHaveBeenCalledTimes(1);
+    expect(reads.metadata).toHaveBeenCalledTimes(1);
     expect(reads.mode).not.toHaveBeenCalled();
   });
 });
