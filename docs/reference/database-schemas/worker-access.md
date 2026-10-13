@@ -2580,10 +2580,10 @@ notification records are both empty. Outbound recovery reuses an empty queue fac
 only at the connection's current admitted read revision. Owning-writer receipts,
 local mutations, and connection retirement invalidate these facts through their
 existing owners.
-Worker auto-suspension takes placement reporting snapshots only when its policy is
-enabled. Placement retirement reuses its own scan for the reporting before-snapshot
-and skips reporting when that scan is empty. These reporting facts do not grant
-mutation authority. Retention, retry timing, schemas, durability, and update behavior are unchanged.
+Worker auto-suspension and placement retirement collect committed placement
+identities from the existing receipt owner; idle reporting does not query the
+placement inventory. Retirement returns the deleted identity in its conditional
+delete. These reporting facts do not grant mutation authority. Retention, retry timing, schemas, durability, and update behavior are unchanged.
 
 Sandbox reservation and removal-intent transactions run in the existing shared-state
 executor. Reservation selection and prune eligibility read authoritative rows inside
@@ -4420,7 +4420,9 @@ Scope matching, FTS scan bounds, fire budgets, and hidden-context limits are unc
 The writer retains the next expiry or rearm deadline per native connection. Calls
 before that deadline skip lifecycle SQL; create, cancel, fire, and failed
 transactions invalidate it. The same lifecycle fact records when no active intents
-remain, so matching skips the FTS query until a mutation invalidates that fact.
+remain, so matching returns without opening a transaction or querying FTS until
+a mutation invalidates that fact. This absence result has no write or external
+effect to authorize; nonempty matches retain transaction and commit admission.
 A nonempty active set still uses the full matching query and eligibility filters.
 Reopening a connection reloads the deadline and active-intent fact. Expiry
 comparison and fired-row numeric validation retain their existing semantics.
@@ -6210,6 +6212,21 @@ The existing shared schema is unchanged. Cron retains its own history operations
 on the existing storage rows; removed Task projections do not regain execution
 or delivery authority.
 
+Native child spawn joins accepted participant recording before capturing the
+controller's complete session row. That one snapshot supplies preferences, depth,
+lineage, contributor credit, and initial child metadata. Proxied completion keeps
+its separate requester identity; the final skill-selection authority check stays
+at child creation. A parent reset during preparation does not retarget the child's
+captured lineage to the replacement session.
+
+Registry mutations plan from the FIFO owner's last committed receipt. Registration
+uses the existing full registry cache, loaded once and updated by those receipts;
+ordinary writes do not reread row versions or registration cohorts in SQL. External
+writers must use the Gateway or run while it is stopped. Unknown commit outcomes
+still require canonical reconciliation. Successful delivery retains its immediate
+durable send receipt, then clears retry/fallback state in the cleanup bookkeeping
+commit. These changes do not alter schema, retention, or update behavior.
+
 Requester wake transitions and settlement use that same worker transaction and
 registry publication owner. Timers and retries retain the original database, run,
 and wake generation through acknowledgement. A known commit keeps its existing
@@ -6561,14 +6578,15 @@ snapshot; generic SecretRef callers retain their current activation guards.
 Hidden GitHub operations and the CLI allowed-host setter remain with their existing
 owners. Schemas, retention, stored bytes, and update behavior are unchanged.
 
-Placement change reporting reads its before/after snapshots in the shared-state
-read worker using the placement store's row codec. It transfers only session
-identity, state, generation, and update time to the Gateway. The reconciliation
-coordinator reserves and admits its sweep before awaiting reporting, preserving
-dispatch ordering and request coalescing. Reporting failures preserve the original
-operation outcomes. Placement
-writes, current-authority checks, and workspace retention retain their existing
-owners; these reporting snapshots grant no execution or deletion authority.
+Placement change reporting subscribes to the existing placement receipt owner
+for the duration of reconciliation, coalescing committed changes by session.
+The owner compares published row facts in memory; retirement carries the deleted
+identity from the same conditional delete. Reporting takes no before/after
+inventory snapshots and still publishes committed changes when later work fails.
+Concurrent committed changes may share a notification batch; notifications grant
+no execution or deletion authority. Metadata changes still use the targeted
+shared-state read worker. Dispatch ordering, current-authority checks, workspace
+retention, and update behavior are unchanged.
 
 Per-agent target discovery consumes the physical database's admitted schema
 without selecting a session row merely to prove availability. Fixed shared stores

@@ -68,6 +68,8 @@ installGatewayTestHooks({
 });
 
 await import("./server.js");
+// Prepare the lazy handler before the first creation RPC starts its response deadline.
+await import("./server-methods/sessions-create.js");
 
 for (const { name, fault, replaceParent } of [
   {
