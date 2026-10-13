@@ -37,7 +37,6 @@ import type { SessionOwnerOption } from "./session-owner-chip.ts";
 import type { SidebarMenusController } from "./sidebar-menus-controller.tsx";
 import type { AgentAvatarProps } from "./solid/agent-avatar.tsx";
 import type { ChannelAvatarProps } from "./solid/channel-avatar.tsx";
-import type { ViewerAvatarProps, ViewerFacepileProps } from "./solid/viewer-facepile.tsx";
 import "./tooltip.ts";
 
 export interface SessionListHost {
@@ -234,6 +233,9 @@ type BridgeAttributes<Props> = SolidJSX.HTMLAttributes<SolidBridgeElement<Props>
 declare module "@solidjs/web" {
   namespace JSX {
     interface IntrinsicElements {
+      "openclaw-sidebar-collapse-toggle": HTMLAttributes<HTMLElement> & {
+        "prop:onToggle"?: () => void;
+      };
       "openclaw-agent-avatar": BridgeAttributes<AgentAvatarProps>;
       "openclaw-catalog-session-menu": HTMLAttributes<
         HTMLElementTagNameMap["openclaw-catalog-session-menu"]
@@ -259,10 +261,6 @@ declare module "@solidjs/web" {
         HTMLElementTagNameMap["openclaw-theme-mode-toggle"]
       > &
         Properties<HTMLElementTagNameMap["openclaw-theme-mode-toggle"]>;
-      "openclaw-viewer-avatar": BridgeAttributes<ViewerAvatarProps> &
-        Pick<ViewerAvatarProps, "variant">;
-      "openclaw-viewer-facepile": BridgeAttributes<ViewerFacepileProps> &
-        Pick<ViewerAvatarProps, "variant">;
     }
   }
 }

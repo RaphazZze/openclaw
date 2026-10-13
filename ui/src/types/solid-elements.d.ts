@@ -8,7 +8,6 @@ import type WaSwitch from "@awesome.me/webawesome/dist/components/switch/switch.
 import type WaTabGroup from "@awesome.me/webawesome/dist/components/tab-group/tab-group.js";
 import type WaTabPanel from "@awesome.me/webawesome/dist/components/tab-panel/tab-panel.js";
 import type WaTab from "@awesome.me/webawesome/dist/components/tab/tab.js";
-import type { WaTabShowEvent } from "@awesome.me/webawesome/dist/events/tab-show.js";
 import type { JSX } from "@solidjs/web";
 import type { UpdateRunRecord } from "../../../src/infra/update-run-record.ts";
 import type { ControlUiSurfaceProps } from "../../../src/plugin-sdk/control-ui.js";
@@ -41,12 +40,15 @@ declare module "@solidjs/web" {
       messageActions: MessageActionDetails | null | undefined;
     }
     interface IntrinsicElements {
-      "openclaw-sidebar-collapse-toggle": HTMLAttributes<HTMLElement> & {
-        "prop:onToggle"?: () => void;
-      };
       "openclaw-github-identity": HTMLAttributes<HTMLElement>;
       "openclaw-plugins-page": HTMLAttributes<HTMLElement>;
       "openclaw-lobster-pet": HTMLAttributes<HTMLElement> & ElementProperties<LobsterPetProps>;
+      "wa-select": HTMLAttributes<WaSelect> & { "prop:value": WaSelect["value"] };
+      "wa-option": HTMLAttributes<WaOption> & {
+        value: WaOption["value"];
+        "prop:label": WaOption["label"];
+        "prop:selected": WaOption["selected"];
+      };
       // Each caller validates the picker option/callback pairing before the DOM boundary.
       "openclaw-select-picker": HTMLAttributes<HTMLElementTagNameMap["openclaw-select-picker"]> & {
         "prop:params": unknown;
@@ -70,6 +72,23 @@ declare module "@solidjs/web" {
         "prop:recommendation"?: ClawHubRecommendation;
         "prop:agentId"?: string;
       };
+      "wa-tab-group": HTMLAttributes<WaTabGroup> & {
+        "prop:active": string;
+        activation: "auto" | "manual";
+        "without-scroll-controls": boolean;
+        "onWa-tab-show"?: (event: CustomEvent<{ name: string }>) => void;
+      };
+      "wa-tab": HTMLAttributes<WaTab> & {
+        panel: string;
+        active?: boolean;
+        disabled?: boolean;
+        "prop:active"?: boolean;
+        "prop:tabIndex"?: number;
+      };
+      "wa-tab-panel": HTMLAttributes<WaTabPanel> & {
+        name: string;
+        "prop:active": boolean;
+      };
       "resizable-divider": Omit<HTMLAttributes<HTMLElement>, "onResize"> & {
         "prop:orientation"?: "horizontal" | "vertical";
         "prop:label": string;
@@ -81,7 +100,14 @@ declare module "@solidjs/web" {
         onResize: (event: CustomEvent<{ splitRatio: number }>) => void;
         "onResize-end"?: () => void;
       };
-
+      "wa-popup": LegacyAttributes<WaPopup> & {
+        active?: boolean;
+        anchor?: WaPopup["anchor"];
+        placement?: WaPopup["placement"];
+        strategy?: WaPopup["strategy"];
+        sync?: WaPopup["sync"];
+        "onWa-reposition"?: EventHandlerUnion<WaPopup, CustomEvent>;
+      };
       "wa-switch": LegacyAttributes<WaSwitch> & {
         size?: WaSwitch["size"];
         checked?: boolean;
@@ -90,14 +116,14 @@ declare module "@solidjs/web" {
       "openclaw-tooltip": HTMLAttributes<Tooltip> & {
         "prop:content"?: Tooltip["content"];
         "prop:contentTemplate"?: Tooltip["contentTemplate"];
-        "prop:delay"?: Tooltip["delay"];
-        "prop:closeDelay"?: Tooltip["closeDelay"];
-        "prop:hoverDismissDelay"?: Tooltip["hoverDismissDelay"];
         "prop:describe"?: Tooltip["describe"];
         "prop:openOnClick"?: Tooltip["openOnClick"];
         "prop:disabled"?: Tooltip["disabled"];
         "prop:anchor"?: Tooltip["anchor"];
         "prop:placement"?: Tooltip["placement"];
+        "prop:closeDelay"?: Tooltip["closeDelay"];
+        "prop:hoverDismissDelay"?: Tooltip["hoverDismissDelay"];
+        "prop:delay"?: Tooltip["delay"];
         "prop:autoSize"?: Tooltip["autoSize"];
         content?: string;
         disabled?: boolean;
@@ -105,6 +131,31 @@ declare module "@solidjs/web" {
         "open-on-click"?: boolean;
         "auto-size"?: boolean;
       };
+      "openclaw-viewer-facepile": HTMLAttributes<
+        HTMLElementTagNameMap["openclaw-viewer-facepile"]
+      > &
+        ElementProperties<
+          Pick<
+            HTMLElementTagNameMap["openclaw-viewer-facepile"],
+            | "staticParticipants"
+            | "staticUsers"
+            | "presencePayload"
+            | "selfUser"
+            | "selfInstanceId"
+            | "sessionKey"
+            | "excludeIdentities"
+            | "totalCount"
+            | "maxVisible"
+            | "personActivity"
+          >
+        > & { variant?: "session" };
+      "openclaw-viewer-avatar": HTMLAttributes<HTMLElementTagNameMap["openclaw-viewer-avatar"]> &
+        ElementProperties<
+          Pick<
+            HTMLElementTagNameMap["openclaw-viewer-avatar"],
+            "identity" | "user" | "markAsViewer"
+          >
+        > & { variant?: HTMLElementTagNameMap["openclaw-viewer-avatar"]["variant"] };
       "openclaw-ip-location": HTMLAttributes<HTMLElementTagNameMap["openclaw-ip-location"]> &
         ElementProperties<Pick<HTMLElementTagNameMap["openclaw-ip-location"], "ip">>;
       "openclaw-link-reader-hovercard-provider": HTMLAttributes<
@@ -171,48 +222,6 @@ declare module "@solidjs/web" {
         > & {
           "onSubmenu-opening"?: (event: CustomEvent<{ item: HTMLElement }>) => void;
         };
-      "wa-option": HTMLAttributes<WaOption> &
-        Properties<WaOption> &
-        Partial<Pick<WaOption, "value" | "disabled" | "label">>;
-      "wa-popup": HTMLAttributes<WaPopup> &
-        Properties<WaPopup> &
-        Partial<
-          Pick<
-            WaPopup,
-            | "active"
-            | "anchor"
-            | "sync"
-            | "placement"
-            | "strategy"
-            | "distance"
-            | "skidding"
-            | "arrow"
-            | "flip"
-            | "shift"
-          >
-        > & {
-          "prop:anchor"?: WaPopup["anchor"];
-          "onWa-reposition"?: EventHandlerUnion<WaPopup, CustomEvent>;
-        };
-      "wa-select": HTMLAttributes<WaSelect> &
-        Properties<WaSelect> &
-        Partial<
-          Pick<
-            WaSelect,
-            | "name"
-            | "size"
-            | "placeholder"
-            | "multiple"
-            | "maxOptionsVisible"
-            | "disabled"
-            | "label"
-            | "required"
-            | "withClear"
-          >
-        > & {
-          "prop:value"?: WaSelect["value"];
-          "with-clear"?: boolean;
-        };
       "wa-popover": LegacyAttributes<WaPopover> &
         Partial<Pick<WaPopover, "for" | "placement">> & {
           distance?: number | `${number}`;
@@ -222,22 +231,6 @@ declare module "@solidjs/web" {
           "onWa-hide"?: (event: Event) => void;
           "onWa-after-hide"?: (event: Event) => void;
         };
-      "wa-tab": HTMLAttributes<WaTab> &
-        Properties<WaTab> &
-        Partial<Pick<WaTab, "panel" | "active" | "disabled">> & {
-          "prop:tabIndex"?: WaTab["tabIndex"];
-        };
-      "wa-tab-group": HTMLAttributes<WaTabGroup> &
-        Properties<WaTabGroup> &
-        Partial<
-          Pick<WaTabGroup, "active" | "placement" | "activation" | "withoutScrollControls">
-        > & {
-          "without-scroll-controls"?: boolean;
-          "onWa-tab-show"?: EventHandlerUnion<WaTabGroup, WaTabShowEvent>;
-        };
-      "wa-tab-panel": HTMLAttributes<WaTabPanel> &
-        Properties<WaTabPanel> &
-        Partial<Pick<WaTabPanel, "name" | "active">>;
     }
     interface SVGAttributes<T> {
       "xml:space"?: "default" | "preserve";

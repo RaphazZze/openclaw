@@ -126,12 +126,22 @@ describe.runIf("__vitest_browser__" in globalThis)("shared control theme inherit
             onNavigate() {},
             onPairMobile() {},
           })}
-          <wa-select label="Language" prop:withClear={true} prop:value="en">
-            <wa-option value="en">English</wa-option>
+          <wa-select
+            ref={(select) => {
+              select.label = "Language";
+              select.withClear = true;
+            }}
+            prop:value="en"
+          >
+            <wa-option value="en" prop:label="English" prop:selected={true}>
+              English
+            </wa-option>
           </wa-select>
-          <wa-tab-group>
+          <wa-tab-group prop:active="first" activation="auto" without-scroll-controls={false}>
             <wa-tab panel="first">First</wa-tab>
-            <wa-tab-panel name="first">Content</wa-tab-panel>
+            <wa-tab-panel name="first" prop:active={true}>
+              Content
+            </wa-tab-panel>
           </wa-tab-group>
           <wa-dropdown-item variant="danger">Delete</wa-dropdown-item>
         </>
