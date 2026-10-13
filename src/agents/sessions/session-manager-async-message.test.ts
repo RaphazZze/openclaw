@@ -20,7 +20,10 @@ import {
   withSessionPendingInputPersistence,
 } from "../../config/sessions/session-accessor.pending-inputs.js";
 import { loadSessionEntryForAdmission } from "../../config/sessions/session-accessor.sqlite-entry-admission.js";
-import { writeSessionEntry } from "../../config/sessions/session-accessor.sqlite-entry-store.js";
+import {
+  deleteSessionEntryRows,
+  writeSessionEntry,
+} from "../../config/sessions/session-accessor.sqlite-entry-store.js";
 import { kickSessionEntryMaintenanceAfterWrite } from "../../config/sessions/session-accessor.sqlite-maintenance-kick.js";
 import { readTranscriptEventRows } from "../../config/sessions/session-accessor.sqlite-read.js";
 import * as reclamationRun from "../../config/sessions/session-accessor.sqlite-reclamation-run.js";
@@ -75,96 +78,111 @@ const user = (key: string) => ({
   idempotencyKey: `${key}:user`,
 });
 
-it("resumes protected-store maintenance after a lazy worker creates an eligible session", async ({
-  signal,
-}) => {
-  const storePath = state.statePath("lazy-maintenance.sqlite");
-  const scope = { agentId: "main", path: storePath };
-  const protectedKey = "agent:main:lazy-protected";
-  const updatedAt = Date.now();
-  openOpenClawAgentDatabase(scope);
-  runOpenClawAgentWriteTransaction((database) => {
-    for (const key of [protectedKey, "agent:main:lazy-other-protected"]) {
-      writeSessionEntry(database, key, {
-        sessionId: key,
-        updatedAt,
-        modelSelectionLocked: true,
-      });
-    }
-  }, scope);
-  const request = {
-    activeSessionKey: protectedKey,
-    archiveDirectory: path.join(path.dirname(storePath), "lazy-archives"),
-    maintenanceConfig: {
-      ...resolveMaintenanceConfigFromInput(),
-      maxEntries: 1,
-      pruneAfterMs: 86_400_000,
-      archiveDashboardAfterMs: null,
-      preserveRecentMs: null,
-    },
-    scope,
-    storePath,
-  };
-  const settled = createDeferred();
-  const archived = createDeferred();
-  const run = reclamationRun.runSqliteSessionReclamation;
-  let passes = 0;
-  const observe = vi
-    .spyOn(reclamationRun, "runSqliteSessionReclamation")
-    .mockImplementation(async (params) => {
-      if (params.plan.kind === "maintenance-plan") {
-        passes++;
-      }
-      const result = await run(params);
-      if (result.kind === "maintenance-plan") {
-        if (result.value.durableNoCandidates === true) {
-          settled.resolve();
-        }
-        if (result.value.archived > 0) {
-          archived.resolve();
-        }
-      }
-      return result;
-    });
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  try {
-    kickSessionEntryMaintenanceAfterWrite(request);
-    await withinTest(settled.promise, signal);
-    await yieldToEventLoop();
-    const protectedPasses = passes;
-    kickSessionEntryMaintenanceAfterWrite(request);
-    await vi.advanceTimersByTimeAsync(1_001);
-    expect(passes).toBe(protectedPasses);
-
-    const target = {
-      agentId: "main",
-      storePath,
-      sessionKey: "agent:main:lazy-eligible",
-      sessionId: "lazy-eligible",
-    };
-    const manager = await SessionManager.openAsync(target, state.workspaceDir);
-    await manager.appendMessageAsync(user("lazy-maintenance"));
-    expect(loadSessionEntry(target)?.sessionId).toBe(target.sessionId);
+it.for([false, true])(
+  "resumes idle protected-store maintenance after a lazy worker creates an eligible session (interrupted retry: %s)",
+  async (interruptedRetry, { signal }) => {
+    const storePath = state.statePath(`lazy-maintenance-${interruptedRetry}.sqlite`);
+    const scope = { agentId: "main", path: storePath };
+    const protectedKey = "agent:main:lazy-protected";
+    const removedKey = "agent:main:lazy-removed";
+    const updatedAt = Date.now();
+    openOpenClawAgentDatabase(scope);
     runOpenClawAgentWriteTransaction((database) => {
-      writeSessionEntry(database, protectedKey, {
-        sessionId: protectedKey,
-        updatedAt: Date.now(),
-        modelSelectionLocked: true,
-        label: "ordinary activity after initialization",
-      });
+      for (const key of [
+        protectedKey,
+        "agent:main:lazy-other-protected",
+        ...(interruptedRetry ? [removedKey] : []),
+      ]) {
+        writeSessionEntry(database, key, {
+          sessionId: key,
+          updatedAt,
+          ...(key === removedKey ? { pinnedAt: updatedAt } : { modelSelectionLocked: true }),
+        });
+      }
     }, scope);
-    kickSessionEntryMaintenanceAfterWrite(request);
-    await yieldToEventLoop();
-    await vi.advanceTimersByTimeAsync(1_001);
-    expect(passes).toBeGreaterThan(protectedPasses);
-    await withinTest(archived.promise, signal);
-    expect(loadSessionEntry(target)?.archiveReason).toBe("active-session-cap");
-  } finally {
-    vi.useRealTimers();
-    await closeOpenClawAgentDatabaseByPathAsync(storePath);
-    observe.mockRestore();
-  }
-});
+    const request = {
+      activeSessionKey: protectedKey,
+      archiveDirectory: path.join(path.dirname(storePath), "lazy-archives"),
+      maintenanceConfig: {
+        ...resolveMaintenanceConfigFromInput(),
+        maxEntries: 1,
+        pruneAfterMs: 86_400_000,
+        archiveDashboardAfterMs: null,
+        preserveRecentMs: null,
+      },
+      scope,
+      storePath,
+    };
+    const settled = createDeferred();
+    const interrupted = createDeferred();
+    const archived = createDeferred();
+    const run = reclamationRun.runSqliteSessionReclamation;
+    let passes = 0;
+    let retryInterrupted = false;
+    const observe = vi
+      .spyOn(reclamationRun, "runSqliteSessionReclamation")
+      .mockImplementation(async (params) => {
+        if (params.plan.kind === "maintenance-plan") {
+          passes++;
+        }
+        const result = await run(params);
+        if (result.kind === "maintenance-plan") {
+          if (result.value.durableNoCandidates === true) {
+            if (interruptedRetry && !retryInterrupted) {
+              retryInterrupted = true;
+              kickSessionEntryMaintenanceAfterWrite(request);
+              interrupted.resolve();
+            } else {
+              settled.resolve();
+            }
+          }
+          if (result.value.archived > 0) {
+            archived.resolve();
+          }
+        }
+        return result;
+      });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      kickSessionEntryMaintenanceAfterWrite(request);
+      if (interruptedRetry) {
+        await withinTest(interrupted.promise, signal);
+        await yieldToEventLoop();
+        runOpenClawAgentWriteTransaction((database) => {
+          deleteSessionEntryRows(database, removedKey, { deleteOwnedWindows: true });
+        }, scope);
+      }
+      await withinTest(settled.promise, signal);
+      await yieldToEventLoop();
+      const protectedPasses = passes;
+      kickSessionEntryMaintenanceAfterWrite(request);
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(passes).toBe(protectedPasses);
+
+      const target = {
+        agentId: "main",
+        storePath,
+        sessionKey: "agent:main:lazy-eligible",
+        sessionId: "lazy-eligible",
+      };
+      const manager = await SessionManager.openAsync(target, state.workspaceDir);
+      await manager.appendMessageAsync(user("lazy-maintenance"));
+      expect(loadSessionEntry(target)?.sessionId).toBe(target.sessionId);
+      await yieldToEventLoop();
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(passes).toBeGreaterThan(protectedPasses);
+      await withinTest(archived.promise, signal);
+      expect(loadSessionEntry(target)?.archiveReason).toBe("active-session-cap");
+      expect((await loadTranscriptEvents(target)).at(-1)).toMatchObject({
+        message: user("lazy-maintenance"),
+      });
+    } finally {
+      vi.useRealTimers();
+      await closeOpenClawAgentDatabaseByPathAsync(storePath);
+      observe.mockRestore();
+    }
+  },
+);
 
 it.each([1, 2])(
   "rereads and retries one local append after a transcript conflict (conflicting writes: %s)",

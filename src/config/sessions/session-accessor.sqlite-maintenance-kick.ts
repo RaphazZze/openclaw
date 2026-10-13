@@ -192,6 +192,11 @@ export function kickSessionEntryMaintenanceAfterWrite(
       unregister.push(
         observeSessionEntryMaintenanceAgeChanges(identity.key.slice(5), (change) => {
           created.ageFact = updateSessionEntryMaintenanceAgeFact(created.ageFact, change);
+          const previous = created.ageChanges.get(change.sessionKey);
+          created.ageChanges.set(change.sessionKey, {
+            ...change,
+            previousEntry: previous ? previous.previousEntry : change.previousEntry,
+          });
           if (
             !change.previousEntry &&
             !(
@@ -203,13 +208,19 @@ export function kickSessionEntryMaintenanceAfterWrite(
               })
             )
           ) {
+            const resume = created.noCandidates && !created.running;
             created.noCandidates = false;
+            if (resume) {
+              if (created.retryDelayMs !== undefined) {
+                if (created.rejections >= MAX_MAINTENANCE_REJECTIONS) {
+                  created.rejections = 0;
+                }
+                scheduleMaintenanceAfterWriteQuiet(databasePath, created);
+              } else {
+                scheduleImmediateMaintenance(databasePath, created);
+              }
+            }
           }
-          const previous = created.ageChanges.get(change.sessionKey);
-          created.ageChanges.set(change.sessionKey, {
-            ...change,
-            previousEntry: previous ? previous.previousEntry : change.previousEntry,
-          });
         }),
       );
       unregister.push(
@@ -343,6 +354,7 @@ function scheduleImmediateMaintenance(
 ): void {
   clearTimeout(owner.timer);
   owner.timer = undefined;
+  owner.retryDelayMs = undefined;
   owner.timerDeadlineMonotonicMs = undefined;
   owner.running = true;
   // Database maintenance outlives the writer's turn and carries its own admission.
@@ -362,6 +374,7 @@ function scheduleMaintenanceAt(
   // Bound relative delays: Node clamps overflowed timeouts to 1 ms.
   const delayMs = Math.max(1, Math.min(SESSION_ENTRY_MAINTENANCE_INTERVAL_MS, nextAt - Date.now()));
   clearTimeout(owner.timer);
+  owner.retryDelayMs = undefined;
   owner.running = false;
   owner.timerDeadlineMonotonicMs = performance.now() + delayMs;
   owner.timer = runInDetachedAsyncContext(() =>
