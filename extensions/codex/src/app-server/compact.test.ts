@@ -260,7 +260,7 @@ describe("maybeCompactCodexAppServerSession", () => {
       identity: successor,
       storePath: scope.storePath,
     });
-    using adoptedCleanup = { [Symbol.dispose]: () => adopted.release() };
+    using _ = { [Symbol.dispose]: () => adopted.release() };
     expect(adopted.binding).toEqual(binding);
     expect(bindingStore.read(successor)).toEqual(binding);
   });
@@ -1247,7 +1247,7 @@ describe("maybeCompactCodexAppServerSession", () => {
       identity: next,
       storePath: scope.storePath,
     });
-    using recoveredCleanup = { [Symbol.dispose]: () => recovered.release() };
+    using _ = { [Symbol.dispose]: () => recovered.release() };
     expect(recovered.binding).toEqual(binding);
     expect(bindingStore.read(next)).toEqual(binding);
   });

@@ -72,10 +72,11 @@ describe("native binding worker admission", () => {
             createSupersededError: () => new Error(`${kind} lineage superseded`),
           });
         };
+        using captures = new DisposableStack();
         const lease = await retain("lease");
-        using leaseCleanup = { [Symbol.dispose]: () => lease.release() };
+        captures.defer(() => lease.release());
         const action = await retain("action");
-        using actionCleanup = { [Symbol.dispose]: () => action.release() };
+        captures.defer(() => action.release());
         await asyncState.register("binding", { value: "before" });
         await owner.withLease(
           "binding",

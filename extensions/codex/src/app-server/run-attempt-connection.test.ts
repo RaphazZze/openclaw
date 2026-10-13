@@ -63,7 +63,7 @@ describe("prepareCodexAttemptConnection", () => {
           },
         },
       });
-      using bindingAuthorityCleanup = {
+      using _ = {
         [Symbol.dispose]: () => connection.releaseBindingAuthority(),
       };
       try {
@@ -103,7 +103,7 @@ describe("prepareCodexAttemptConnection", () => {
           },
         },
       });
-      using bindingAuthorityCleanup = {
+      using _ = {
         [Symbol.dispose]: () => connection.releaseBindingAuthority(),
       };
       const prepareRemote = vi.fn(async () => remoteNote);
@@ -190,7 +190,7 @@ describe("prepareCodexAttemptConnection", () => {
           },
         },
       });
-      using bindingAuthorityCleanup = {
+      using _ = {
         [Symbol.dispose]: () => connection.releaseBindingAuthority(),
       };
       expect(connection.appServer.start.transport).toBe(
@@ -235,7 +235,7 @@ describe("prepareCodexAttemptConnection", () => {
     const originalHostCapabilities = params.hostCapabilities;
 
     const connection = await prepareCodexAttemptConnection({ params, options: { bindingStore } });
-    using bindingAuthorityCleanup = {
+    using _ = {
       [Symbol.dispose]: () => connection.releaseBindingAuthority(),
     };
     expect(bindingStore.read(current)).toEqual(binding);
@@ -436,7 +436,7 @@ describe("prepareCodexAttemptConnection", () => {
         return;
       }
       const connection = await pending;
-      using bindingAuthorityCleanup = {
+      using _ = {
         [Symbol.dispose]: () => connection.releaseBindingAuthority(),
       };
       if (placement.startsWith("ordinary-")) {
@@ -474,7 +474,7 @@ describe("prepareCodexAttemptConnection", () => {
       params,
       options: { bindingStore: testCodexAppServerBindingStore },
     });
-    using bindingAuthorityCleanup = {
+    using _ = {
       [Symbol.dispose]: () => connection.releaseBindingAuthority(),
     };
 
@@ -539,7 +539,7 @@ describe("prepareCodexAttemptConnection", () => {
         params,
         options: { bindingStore: testCodexAppServerBindingStore },
       });
-      using bindingAuthorityCleanup = {
+      using _ = {
         [Symbol.dispose]: () => connection.releaseBindingAuthority(),
       };
 
@@ -612,7 +612,7 @@ describe("prepareCodexAttemptConnection", () => {
         params,
         options: { bindingStore: testCodexAppServerBindingStore },
       });
-      using bindingAuthorityCleanup = {
+      using _ = {
         [Symbol.dispose]: () => connection.releaseBindingAuthority(),
       };
 
@@ -658,7 +658,7 @@ describe("prepareCodexAttemptConnection", () => {
         pluginConfig: { appServer: { homeScope: "user" } },
       },
     });
-    using bindingAuthorityCleanup = {
+    using _ = {
       [Symbol.dispose]: () => connection.releaseBindingAuthority(),
     };
     const request = vi.fn(async (_method: string, _params?: unknown) => ({
@@ -717,7 +717,7 @@ describe("prepareCodexAttemptConnection", () => {
       params,
       options: { bindingStore: testCodexAppServerBindingStore },
     });
-    using bindingAuthorityCleanup = {
+    using _ = {
       [Symbol.dispose]: () => connection.releaseBindingAuthority(),
     };
 
@@ -832,7 +832,7 @@ describe("prepareCodexAttemptConnection", () => {
       params,
       options: { bindingStore: testCodexAppServerBindingStore },
     });
-    using bindingAuthorityCleanup = {
+    using _ = {
       [Symbol.dispose]: () => connection.releaseBindingAuthority(),
     };
 
@@ -863,7 +863,7 @@ describe("prepareCodexAttemptConnection", () => {
       params,
       options: { bindingStore: testCodexAppServerBindingStore },
     });
-    using bindingAuthorityCleanup = {
+    using _ = {
       [Symbol.dispose]: () => connection.releaseBindingAuthority(),
     };
 
@@ -919,7 +919,7 @@ describe("prepareCodexAttemptConnection", () => {
       params,
       options: { bindingStore: testCodexAppServerBindingStore },
     });
-    using bindingAuthorityCleanup = {
+    using _ = {
       [Symbol.dispose]: () => connection.releaseBindingAuthority(),
     };
 
@@ -964,7 +964,7 @@ describe("prepareCodexAttemptConnection", () => {
         params,
         options: { bindingStore: testCodexAppServerBindingStore },
       });
-      using bindingAuthorityCleanup = {
+      using _ = {
         [Symbol.dispose]: () => connection.releaseBindingAuthority(),
       };
 

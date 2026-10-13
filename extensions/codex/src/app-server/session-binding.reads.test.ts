@@ -329,14 +329,15 @@ describe("Codex app-server binding reads", () => {
         });
       }
       await store.mutate(identity, { kind: "set", binding });
+      using captures = new DisposableStack();
       const lease = await resolveCodexSessionBinding({ bindingStore: store, identity, storePath });
-      using leaseCleanup = { [Symbol.dispose]: () => lease.release() };
+      captures.defer(() => lease.release());
       const mutation = await resolveCodexSessionBinding({
         bindingStore: store,
         identity: source,
         storePath,
       });
-      using mutationCleanup = { [Symbol.dispose]: () => mutation.release() };
+      captures.defer(() => mutation.release());
       await store.withLease(
         identity,
         async () => {
@@ -358,9 +359,9 @@ describe("Codex app-server binding reads", () => {
             storePath,
             update: () => ({ previousSessionId: "changed-without-new-session-id" }),
           });
-          // Pure caller liveness remains valid. Only the fresh composed source
-          // validation can refuse this mutation, even though its lease is current.
-          mutation.authority.assertCurrent();
+          expect(() => mutation.authority.assertCurrent()).toThrow(
+            "Codex session generation is no longer current",
+          );
           await expect(
             store.mutate(
               identity,

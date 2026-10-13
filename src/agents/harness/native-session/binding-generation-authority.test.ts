@@ -62,7 +62,7 @@ describe("native session binding generation authority", () => {
         return;
       }
       const resolved = await pending;
-      using lineageCleanup = { [Symbol.dispose]: () => resolved.release() };
+      using _ = { [Symbol.dispose]: () => resolved.release() };
       expect(resolved.binding).toEqual(binding);
       await expect(resolved.authority.withCurrent(() => undefined)).resolves.toBeUndefined();
       if (state === "ephemeral") {
@@ -117,7 +117,7 @@ describe("native session binding generation authority", () => {
       createSupersededError,
       assertCurrent: () => controller.signal.throwIfAborted(),
     });
-    using lineageCleanup = { [Symbol.dispose]: () => retained.release() };
+    using _ = { [Symbol.dispose]: () => retained.release() };
     const cleanup = retained.authority.withLiveness(() => {});
     const calls = observeMainThreadSql();
     try {
@@ -157,7 +157,7 @@ describe("native session binding generation authority", () => {
       storePath,
       createSupersededError,
     });
-    using parentCleanup = { [Symbol.dispose]: () => parent.release() };
+    using _ = { [Symbol.dispose]: () => parent.release() };
     const child = await resolvePreparedNativeSessionBinding({
       target,
       storePath,
@@ -182,7 +182,7 @@ describe("native session binding generation authority", () => {
       storePath,
       createSupersededError,
     });
-    using lineageCleanup = { [Symbol.dispose]: () => retained.release() };
+    using _ = { [Symbol.dispose]: () => retained.release() };
     const controller = new AbortController();
     controller.abort(new Error("resolver revoked"));
     await expect(

@@ -234,7 +234,7 @@ describe("maybeCompactCodexAppServerSession", () => {
           identity: rejection === "generation" ? next : current,
           storePath: scope.storePath,
         });
-        using recoveredCleanup = { [Symbol.dispose]: () => recovered.release() };
+        using _ = { [Symbol.dispose]: () => recovered.release() };
         expect(recovered.binding).toEqual(binding);
         if (rejection === "generation") {
           await expect(

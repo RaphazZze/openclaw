@@ -480,7 +480,7 @@ describe("session list resolver cache", () => {
       const storePath = path.join(stateDir, "sessions.json");
       const store: Record<string, SessionEntry> = {};
       const ownerId = scenario.owned ? ensureProfileForEmail("owner@example.com").id : undefined;
-      using profileCatalogCleanup = {
+      using _ = {
         [Symbol.dispose]: (await prepareUserProfileCatalog()).release,
       };
       for (let index = 0; index < scenario.count; index += 1) {
@@ -502,7 +502,7 @@ describe("session list resolver cache", () => {
       const titleFieldsBySessionKey = new Map(
         Array.from(
           { length: scenario.count },
-          (_, index) =>
+          (_value, index) =>
             [
               `agent:main:title-batch-${index}`,
               { firstUserMessage: `title ${index}`, lastMessagePreview: `last ${index}` },
