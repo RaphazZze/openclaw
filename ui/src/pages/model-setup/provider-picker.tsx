@@ -1,4 +1,4 @@
-import { createMemo, createUniqueId, onCleanup } from "solid-js";
+import { createMemo, createUniqueId } from "solid-js";
 import type {
   SystemAgentSetupActivateParams,
   SystemAgentSetupDetectResult,
@@ -57,32 +57,6 @@ export function ManualProviderPicker(
 ) {
   const id = createUniqueId();
   let menu: MenuHandle;
-  let removeKeydown: (() => void) | undefined;
-  const onKeydown = (event: KeyboardEvent) => {
-    if (
-      !menu.overlay.open ||
-      !event.composedPath().includes(menu.overlay.surface) ||
-      (event.key !== "Tab" && event.key !== "Escape")
-    ) {
-      return;
-    }
-    // Keep this picker inside the setup form's keyboard flow, including while opening.
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.key === "Escape") {
-      menu.close();
-      return;
-    }
-    const target = event.shiftKey
-      ? menu.overlay.trigger
-      : menu.overlay.trigger
-          ?.closest(".model-setup__manual")
-          ?.querySelector<HTMLInputElement>('input[type="password"]');
-    if (menu.overlay.request(false, "none")) {
-      target?.focus({ preventScroll: true });
-    }
-  };
-  onCleanup(() => removeKeydown?.());
   const providerMethod = createMemo(() =>
     props.provider ? manualProviderMethod(props.provider) : undefined,
   );
@@ -131,18 +105,14 @@ export function ManualProviderPicker(
       items={items()}
       ref={(handle) => {
         menu = handle;
-        // Capture above the surface, before the shared menu's native Tab handler.
-        const root = handle.overlay.surface.parentElement!;
-        root.addEventListener("keydown", onKeydown, true);
-        removeKeydown = () => root.removeEventListener("keydown", onKeydown, true);
       }}
-      onOpenChange={(open) => {
-        if (open) {
-          menu.overlay.surface
-            .querySelector<HTMLElement>("[data-initial-focus]")
-            ?.scrollIntoView?.({ block: "nearest" });
-        }
-      }}
+      tabFocusTarget={(backward) =>
+        backward
+          ? menu.overlay.trigger
+          : (menu.overlay.trigger
+              ?.closest(".model-setup__manual")
+              ?.querySelector<HTMLInputElement>('input[type="password"]') ?? undefined)
+      }
       onSelect={(item) => {
         if (item.id !== props.manualProviderId) {
           props.onManualProviderChange(item.id);
