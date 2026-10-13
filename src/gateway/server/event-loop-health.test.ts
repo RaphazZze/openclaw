@@ -15,6 +15,7 @@ import {
   getActiveDiagnosticTraceContext,
   runWithDiagnosticTraceContext,
 } from "../../infra/diagnostic-trace-context.js";
+import * as mainThreadStall from "../../infra/main-thread-stall.js";
 import {
   startDiagnosticStabilityRecorder,
   stopDiagnosticStabilityRecorder,
@@ -136,20 +137,31 @@ describe("createGatewayEventLoopHealthMonitor", () => {
   });
 
   it("detects a late idle wake with separate wall and elapsed clocks", async () => {
-    const harness = createMonitorHarness({
-      isIdle: () => true,
-      schedulerWallOffsetMs: 1_700_000_000_000,
+    // Isolate deadline detection from callback attribution of the synthetic clock jump.
+    const stallMonitor = vi.spyOn(mainThreadStall, "createMainThreadStallMonitor").mockReturnValue({
+      drain: () => ({ stalls: [], dropped: 0, delayMaxMs: 0 }),
+      reset: () => {},
+      stop: () => {},
     });
-    await harness.samples(50);
-    await harness.samples(450);
-    expect(harness.monitor.snapshot()).toMatchObject({ degraded: false });
-    harness.elapseWithoutSampling(12_000);
-    await harness.sample();
-    expect(harness.monitor.snapshot()).toMatchObject({
-      degraded: true,
-      delayMaxMs: 2_020,
-      reasons: ["event_loop_delay"],
-    });
+    try {
+      const harness = createMonitorHarness({
+        isIdle: () => true,
+        schedulerWallOffsetMs: 1_700_000_000_000,
+      });
+      await harness.samples(50);
+      await harness.samples(450);
+      expect(harness.monitor.snapshot()).toMatchObject({ degraded: false });
+      harness.elapseWithoutSampling(12_000);
+      nativeDelay.max = 20_000_000;
+      await harness.sample();
+      expect(harness.monitor.snapshot()).toMatchObject({
+        degraded: true,
+        delayMaxMs: 2_020,
+        reasons: ["event_loop_delay"],
+      });
+    } finally {
+      stallMonitor.mockRestore();
+    }
   });
 
   it("keeps idle callback stalls and resumes one-second sampling after degradation", async () => {
