@@ -130,10 +130,9 @@ export function captureSqliteWorkerOpen(
             }),
         }
       : {
-          createOpenAdmission:
-            createAdmission || options.target
-              ? undefined
-              : captureSqliteWorkerDatabaseAdmission(databasePath),
+          createOpenAdmission: createAdmission
+            ? undefined
+            : captureSqliteWorkerDatabaseAdmission(databasePath),
         }),
     moduleUrl: new URL(options.moduleUrl),
     databasePath,

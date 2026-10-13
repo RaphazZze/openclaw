@@ -92,7 +92,7 @@ export class SqliteWorkerBroker {
       this.enqueue(actor.slot, { type: "close", actor: actor.id }, 0, {
         maintenanceScope,
         createAdmission: captureSqliteWorkerDatabaseAdmission(
-          actor.target ? undefined : (actor.stateDatabasePath ?? actor.databasePath),
+          actor.stateDatabasePath ?? actor.databasePath,
         ),
       }),
     fail: (slot, error) => this.fail(slot, error),
@@ -379,9 +379,7 @@ export class SqliteWorkerBroker {
             assertCurrent,
             createAdmission:
               createAdmission ??
-              captureSqliteWorkerDatabaseAdmission(
-                owned.target ? undefined : (owned.stateDatabasePath ?? owned.databasePath),
-              ),
+              captureSqliteWorkerDatabaseAdmission(owned.stateDatabasePath ?? owned.databasePath),
             maintenanceScope: scope
               ? scope.maintenanceScope
               : getOpenClawDatabaseMaintenanceScope(),
