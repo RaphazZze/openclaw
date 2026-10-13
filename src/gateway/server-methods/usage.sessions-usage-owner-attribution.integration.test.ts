@@ -166,7 +166,7 @@ it("preserves global session addition order across agents before overview pagina
     const result = {
       ...buildUsageOverview({
         rows: sessions.map((session, index) =>
-          Object.assign({}, session, { usage: loaded.summaries[index] }),
+          Object.assign({}, session, { usage: loaded.summaries[index] ?? null }),
         ),
         options: { offset: 1 },
         dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
