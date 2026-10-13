@@ -193,7 +193,7 @@ suite.define(() => {
         await page.keyboard.press("Escape");
         await page.locator(".shell--nav-drawer-open").waitFor({ state: "detached" });
         await action.tap();
-        const menu = page.locator(".sidebar-new-session-menu:visible");
+        const menu = page.locator('.sidebar-new-session-menu [role="menu"]:visible');
         await menu.locator('[role="menuitem"][data-value="writer"]').waitFor();
         expect(
           await menu
