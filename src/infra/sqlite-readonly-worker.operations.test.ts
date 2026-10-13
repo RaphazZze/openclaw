@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { deserialize } from "node:v8";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
@@ -12,6 +13,7 @@ import { createDeferredCore } from "../shared/deferred.js";
 import { createCurrentOpenClawAgentDatabaseFixtures } from "../state/openclaw-agent-db.test-support.js";
 import { onInternalDiagnosticEvent, waitForDiagnosticEventsDrained } from "./diagnostic-events.js";
 import type { DiagnosticWorkerRequestFields } from "./diagnostic-process-types.js";
+import { cleanupSnapshotOperations } from "./sqlite-readonly-location-cleanup.js";
 import {
   createSqliteReadOnlyWorkerScope,
   runSqliteReadOnlyOperation,
@@ -28,6 +30,7 @@ const scope = createSqliteReadOnlyWorkerScope();
 const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
   afterAll(async () => {
     await scope.close();
+    await cleanupSnapshotOperations();
     vi.restoreAllMocks();
     cleanup();
   }),
@@ -266,5 +269,151 @@ it("preserves bounded catalog reads, queued inputs, and cancellation ownership",
     send.mockRestore();
     await scope.close();
     await Promise.allSettled(pending);
+  }
+});
+
+it("reuses workers across closed scopes without carrying database or inspection state", async () => {
+  const root = tempDirs.make("openclaw-readonly-second-");
+  const other = path.join(root, "openclaw-agent.sqlite");
+  createCurrentOpenClawAgentDatabaseFixtures(path.join(root, "template.sqlite"), [
+    { path: other, agentId: "main" },
+  ]);
+  const database = new DatabaseSync(other);
+  try {
+    database
+      .prepare("INSERT INTO cache_entries (scope, key, value_json, updated_at) VALUES (?, ?, ?, ?)")
+      .run("plugin-model-catalog-v1", "small", "other database", 1);
+  } finally {
+    database.close();
+  }
+  const start = vi.mocked(spawn).mock.calls.length;
+  const query = async (pathname: string, artifactPreserving?: true) => {
+    const request = createSqliteReadOnlyWorkerScope();
+    try {
+      return await request.run(() =>
+        runSqliteReadOnlyOperation(
+          pathname,
+          { type: "pluginCatalog.read", input: { agentId: "main", pluginIds: ["small"] } },
+          {
+            source: "snapshot",
+            expectedIdentity: readDatabasePathIdentitySync(pathname).key,
+            env,
+            artifactPreserving,
+          },
+        ),
+      );
+    } finally {
+      await request.close();
+    }
+  };
+  await expect(query(source, true)).resolves.toEqual([
+    { pluginId: "small", contents: "small catalog" },
+  ]);
+  await expect(query(other)).resolves.toEqual([{ pluginId: "small", contents: "other database" }]);
+  await expect(
+    runSqliteReadOnlyOperation(
+      source,
+      { type: "pluginCatalog.read", input: { agentId: "main", pluginIds: ["small"] } },
+      { source: "canonical", expectedIdentity, env },
+    ),
+  ).resolves.toEqual([{ pluginId: "small", contents: "small catalog" }]);
+  expect(vi.mocked(spawn).mock.calls.length - start).toBe(1);
+  const reusedChild = vi.mocked(spawn).mock.results.at(-1)?.value;
+  expect(reusedChild.exitCode).toBeNull();
+  reusedChild.kill("SIGKILL");
+  await new Promise<void>((resolve) => {
+    reusedChild.once("close", resolve);
+  });
+  await expect(query(other)).resolves.toEqual([{ pluginId: "small", contents: "other database" }]);
+  expect(vi.mocked(spawn).mock.calls.length - start).toBe(2);
+});
+
+it("closes a queued scope without waiting for an unrelated active transfer", async ({ signal }) => {
+  const command = {
+    type: "pluginCatalog.read" as const,
+    input: { agentId: "main", pluginIds: ["small"] },
+  };
+  const options = { source: "canonical" as const, expectedIdentity, env };
+  await runSqliteReadOnlyOperation(source, command, options);
+  const activeChild = vi.mocked(spawn).mock.results.at(-1)?.value;
+  const emit = activeChild.emit.bind(activeChild);
+  const paused = createDeferredCore<() => boolean>();
+  let pause = true;
+  const receiving = vi.spyOn(activeChild, "emit").mockImplementation((event, ...args) => {
+    const message: unknown = args[0];
+    if (
+      event === "message" &&
+      pause &&
+      isRecord(message) &&
+      isRecord(message.result) &&
+      message.result.type === "start"
+    ) {
+      pause = false;
+      paused.resolve(() => emit(event, ...args));
+      return true;
+    }
+    return emit(event, ...args);
+  });
+  const firstScope = createSqliteReadOnlyWorkerScope();
+  const secondScope = createSqliteReadOnlyWorkerScope();
+  const active = firstScope.run(() => runSqliteReadOnlyOperation(source, command, options));
+  const release = await withinTest(
+    awaitGateBeforeSettlement(paused.promise, active, "Active read did not reach transfer"),
+    signal,
+  );
+  const queued = secondScope.run(() => runSqliteReadOnlyOperation(source, command, options));
+  const rejected = expect(queued).rejects.toThrow("scope closed");
+  let closed = false;
+  const closing = secondScope.close().then(() => {
+    closed = true;
+  });
+  try {
+    await nextTurn();
+    expect(closed).toBe(true);
+    await rejected;
+    expect(activeChild.exitCode).toBeNull();
+  } finally {
+    release();
+    receiving.mockRestore();
+    await Promise.allSettled([active, queued, closing]);
+    await firstScope.close();
+  }
+  await expect(active).resolves.toEqual([{ pluginId: "small", contents: "small catalog" }]);
+});
+
+it("bounds concurrent incompatible launches to four live reader processes", async () => {
+  await cleanupSnapshotOperations();
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  let live = 0;
+  let peak = 0;
+  vi.mocked(spawn).mockImplementation((...args) => {
+    const processChild = actual.spawn(...args);
+    peak = Math.max(peak, ++live);
+    processChild.once("close", () => {
+      live--;
+    });
+    return processChild;
+  });
+  try {
+    const rows = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        runSqliteReadOnlyOperation(
+          source,
+          { type: "pluginCatalog.read", input: { agentId: "main", pluginIds: ["small"] } },
+          {
+            source: "canonical",
+            expectedIdentity,
+            env: { ...env, OPENCLAW_POOL_FIXTURE: String(index) },
+          },
+        ),
+      ),
+    );
+    expect(rows).toEqual(
+      Array.from({ length: 8 }, () => [{ pluginId: "small", contents: "small catalog" }]),
+    );
+    expect(peak).toBeLessThanOrEqual(4);
+  } finally {
+    await cleanupSnapshotOperations();
+    vi.mocked(spawn).mockImplementation(actual.spawn);
   }
 });

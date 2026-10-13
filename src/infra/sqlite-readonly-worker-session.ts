@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { Socket } from "node:net";
 import path from "node:path";
 import { serialize } from "node:v8";
 import { sliceUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
@@ -62,6 +63,7 @@ type SqliteReadOnlyWorkerSession = {
     pathname: string,
     options: SqliteReadOnlyWorkerOptions,
   ) => Promise<SqliteReadOnlyWorkerValue>;
+  setIdle: (idle: boolean) => void;
   close: () => Promise<void>;
 };
 
@@ -69,6 +71,7 @@ export function createSqliteReadOnlyWorkerSession(
   host: SqliteReadOnlyWorkerLaunch & {
     retainLifetime?: boolean;
     retainOnOperationError?: boolean;
+    pooledRead?: boolean;
     argv: string[];
     requestArgs: (pathname: string, options: SqliteReadOnlyWorkerOptions) => string[];
     readBudget: (pathname: string) => { timeoutMs: number; size: string };
@@ -96,7 +99,24 @@ export function createSqliteReadOnlyWorkerSession(
     transport.kind === "broker"
       ? transport.owner.spawn(executable, argv, spawnOptions)
       : spawn(executable, argv, spawnOptions);
-  recordChildProcessSpawn(executable, child);
+  recordChildProcessSpawn(
+    executable,
+    child,
+    host.pooledRead ? `sqlite.scoped-read.${transport.kind}` : `sqlite.session.${transport.kind}`,
+  );
+  const setIdle = (idle: boolean) => {
+    if (transport.kind !== "native") {
+      return;
+    }
+    const method = idle ? "unref" : "ref";
+    child[method]();
+    child.channel?.[method]?.();
+    for (const stream of [child.stdout, child.stderr]) {
+      if (stream instanceof Socket) {
+        stream[method]();
+      }
+    }
+  };
   let retired = false;
   let sequence = 0;
   let pendingOperation: Promise<SqliteReadOnlyWorkerValue> | undefined;
@@ -134,6 +154,7 @@ export function createSqliteReadOnlyWorkerSession(
     authReaderResources.clear();
   });
   const retire = (error?: unknown) => {
+    setIdle(false);
     retired = true;
     if (pending && error !== undefined) {
       pending.failure ??= error;
@@ -150,6 +171,12 @@ export function createSqliteReadOnlyWorkerSession(
     pending = undefined;
     pendingOperation = undefined;
     request.cleanup();
+    if (host.pooledRead) {
+      for (const unregister of authReaderResources.values()) {
+        unregister();
+      }
+      authReaderResources.clear();
+    }
     return request;
   };
   if (host.retainLifetime !== false) {
@@ -357,7 +384,9 @@ export function createSqliteReadOnlyWorkerSession(
                         ? { command: serialize(options.command).toString("base64") }
                         : {
                             retainReader:
-                              options.source === "canonical" && !options.artifactPreserving,
+                              !host.pooledRead &&
+                              options.source === "canonical" &&
+                              !options.artifactPreserving,
                             schema:
                               options.source === "canonical" && !options.artifactPreserving
                                 ? captureSqliteAuthSchema(pathname, options.expectedIdentity)
@@ -385,7 +414,9 @@ export function createSqliteReadOnlyWorkerSession(
         }
       }));
     },
+    setIdle,
     async close() {
+      session.setIdle(false);
       if (retired) {
         await closed;
         return;
