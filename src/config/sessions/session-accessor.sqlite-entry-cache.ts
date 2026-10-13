@@ -20,7 +20,6 @@ import {
 } from "./session-accessor.sqlite-entry-cache-projection.js";
 import {
   emitPreparedSessionSharingChange,
-  invalidateSessionEntryPublication,
   publishSessionSharingEntryChange,
 } from "./session-accessor.sqlite-entry-cache-publication.js";
 import {
