@@ -146,7 +146,7 @@ suite.define(() => {
           });
           expect(loggedOut.code, loggedOut.stderr).toBe(0);
           expect(loggedOut.stdout).toContain("Removed auth profile");
-          expect(loggedOut.stderr).not.toContain("could not refresh");
+          expect(loggedOut.stderr, instance.logs()).not.toContain("could not refresh");
           expect(await persistedAuth()).toEqual(removed);
           await page.reload();
           await waitForControlUiGatewayReady(page);
