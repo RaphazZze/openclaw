@@ -8,6 +8,7 @@ import {
   selectedGitHubPublisher,
   type GitHubPublicationView,
 } from "../../../lib/sessions/github-publication-controller.ts";
+import type { PresentationValue } from "../../../lit/presentation-binding.ts";
 import { solidContent } from "../../../lit/solid-content.tsx";
 import { GitHubPublicationMenu } from "./chat-github-publication-menu.tsx";
 
@@ -42,7 +43,10 @@ function sharedUnavailableMessage(
   }
 }
 
-export function renderGitHubPublicationAction(publication: GitHubPublicationView) {
+export function renderGitHubPublicationAction(
+  publication: GitHubPublicationView,
+  presented: PresentationValue = true,
+) {
   if (publication.result?.status === "published") {
     return html`<a
         class="chat-pr__create"
@@ -93,6 +97,7 @@ export function renderGitHubPublicationAction(publication: GitHubPublicationView
       selected: publication.selection?.source,
       duplicateLogin: shared.login === personal.account.login,
       busy: publication.activity !== null,
+      presented,
       onSelect: (source: "shared" | "personal") => publication.onSelect?.(source),
     })}
   `;

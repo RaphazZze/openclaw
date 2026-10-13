@@ -1,16 +1,39 @@
-import { createMemo, createUniqueId } from "solid-js";
+import { createEffect, createMemo, createUniqueId } from "solid-js";
 import { Icon } from "../../../components/solid/icon.tsx";
-import { Menu } from "../../../components/solid/menu.tsx";
+import { Menu, type MenuHandle } from "../../../components/solid/menu.tsx";
 import { t } from "../../../lib/reactive/i18n.ts";
+import {
+  PRESENTATION_CHANGED_EVENT,
+  type PresentationValue,
+} from "../../../lit/presentation-binding.ts";
 
 export function GitHubPublicationMenu(props: {
   choices: readonly { source: "shared" | "personal"; login: string; label: string }[];
   selected?: "shared" | "personal";
   duplicateLogin: boolean;
   busy: boolean;
+  presented: PresentationValue;
   onSelect: (source: "shared" | "personal") => void;
 }) {
   const id = createUniqueId();
+  let menu: MenuHandle | undefined;
+  const isPresented = (value: PresentationValue) =>
+    typeof value === "boolean" ? value : value.isPresented();
+  createEffect(
+    () => props.presented,
+    (value) => {
+      const sync = () => {
+        if (!isPresented(value)) {
+          menu?.close();
+        }
+      };
+      sync();
+      if (typeof value !== "boolean") {
+        value.owner.addEventListener(PRESENTATION_CHANGED_EVENT, sync);
+        return () => value.owner.removeEventListener(PRESENTATION_CHANGED_EVENT, sync);
+      }
+    },
+  );
   const items = createMemo(() =>
     props.choices.map((choice) => ({
       id: choice.source,
@@ -44,6 +67,14 @@ export function GitHubPublicationMenu(props: {
       triggerClass="btn btn--ghost btn--icon chat-icon-btn"
       trigger={<Icon name="chevronDown" />}
       items={items()}
+      ref={(handle) => {
+        menu = handle;
+      }}
+      onBeforeShow={(event) => {
+        if (!isPresented(props.presented)) {
+          event.preventDefault();
+        }
+      }}
       onSelect={(item) => {
         if (item.id === "shared" || item.id === "personal") {
           props.onSelect(item.id);

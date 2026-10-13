@@ -246,6 +246,7 @@ function renderWorkRow(
   onOpenSessionDiff?: () => void,
   publication?: GitHubPublicationView,
   onDismissBranch?: (branch: ControlUiSessionBranch) => void,
+  presented: PresentationValue = true,
 ) {
   const published =
     !branch && publication?.result?.status === "published" ? publication.result : undefined;
@@ -270,7 +271,7 @@ function renderWorkRow(
         ${renderStatusWarning(status)}
         ${
           publication
-            ? renderGitHubPublicationAction(publication)
+            ? renderGitHubPublicationAction(publication, presented)
             : branch
               ? renderCreatePullRequestLink(branch)
               : nothing
@@ -335,6 +336,7 @@ export function renderChatPullRequests(props: {
         props.onOpenSessionDiff,
         publication,
         props.onDismissBranch,
+        props.presented,
       )}
     </div>`;
   }
@@ -422,18 +424,21 @@ export function renderChatPullRequests(props: {
           </article>
         `;
       })}
-      ${recovery ? renderPublicationRecovery(recovery) : nothing}
+      ${recovery ? renderPublicationRecovery(recovery, props.presented) : nothing}
     </div>
   `;
 }
 
-function renderPublicationRecovery(publication: GitHubPublicationView) {
+function renderPublicationRecovery(
+  publication: GitHubPublicationView,
+  presented: PresentationValue = true,
+) {
   const failed = publication.result?.status === "failed";
   const content = html`<div class="chat-pr__publication-recovery">
     ${renderGitHubPublicationDetails(publication, { inline: failed })}
     ${
       publication.result?.status !== "published"
-        ? html`<div>${renderGitHubPublicationAction(publication)}</div>`
+        ? html`<div>${renderGitHubPublicationAction(publication, presented)}</div>`
         : nothing
     }
   </div>`;
