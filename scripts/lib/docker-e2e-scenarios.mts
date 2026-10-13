@@ -304,6 +304,12 @@ export const mainLanes: DockerE2eLane[] = [
     stateScenario: "empty",
     weight: 3,
   }),
+  npmLane("muse-runtime", {
+    needsPackage: true,
+    resources: ["service"],
+    stateScenario: "empty",
+    timeoutMs: 20 * 60 * 1000,
+  }),
   serviceLane("codex-media-path", {
     prepublishPluginPackages: ["@openclaw/codex"],
     resources: ["npm"],
@@ -631,6 +637,20 @@ export const publicInstallerLanes: DockerE2eLane[] = [
     e2eImageKind: "bare",
     provider: "claude",
     resources: ["npm", "service"],
+  }),
+];
+
+// Interactive device authorization is intentionally never selected by an all-lanes run.
+export const optInLanes: DockerE2eLane[] = [
+  liveLane("live-muse", {
+    command: liveDockerScriptCommand("e2e/muse-live-docker.sh"),
+    e2eImageKind: "bare",
+    needsPackage: true,
+    provider: "meta",
+    resources: ["npm", "service"],
+    stateScenario: "empty",
+    timeoutMs: 30 * 60 * 1000,
+    noOutputTimeoutMs: 12 * 60 * 1000,
   }),
 ];
 

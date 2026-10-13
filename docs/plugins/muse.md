@@ -96,9 +96,12 @@ it.
 Each credential gets its own `muse serve` process. Changing the key starts a
 new Muse session instead of resuming one that belongs to another credential.
 
-If Muse rejects the credential, or finds none, the turn fails with Muse's
-error. Run `muse` in a terminal on the Gateway host to check sign-in and model
-access.
+If Muse rejects the credential, or finds none, the turn fails. Chat shows
+OpenClaw's generic failure notice; the Gateway log (`openclaw logs --follow`)
+carries the actionable cause, for example "Muse Code is not signed in on the
+Gateway host ... Run `muse login` there, or set META_API_KEY for the Gateway",
+plus the last lines of Muse's stderr (an invalid `META_API_KEY` appears only
+there).
 
 ## Configuration
 
@@ -139,9 +142,11 @@ sandbox posture:
 | `ask: "always"`                      | Refused. Muse cannot guarantee an approval prompt for every native command.                   |
 
 When Muse asks for approval, OpenClaw shows its normal approval prompt with
-**Allow once** and **Deny**. The harness answers with a choice that Muse
-offered. A denied, expired, or cancelled approval sends a deny choice. The
-harness never grants persistent approvals.
+**Allow once** and **Deny** to approval surfaces watching the session, such as
+the Control UI. The harness answers with a choice that Muse offered. A denied,
+expired, or cancelled approval sends a deny choice, and so does an approval
+with no surface to show it. Each approval waits up to two minutes. The harness
+never grants persistent approvals.
 
 The harness also refuses an attempt when OpenClaw requires an OpenClaw sandbox,
 workspace-only file access, or a restricted plugin tool policy. Muse runs on
@@ -160,9 +165,14 @@ the fingerprint matches. If any of those inputs changed, or the previous
 transcript was marked unsafe to replay, the next turn starts a new Muse
 session.
 
-If Muse reports that the stored session no longer exists, the harness starts a
-new one. Other resume failures (auth, transport, or an unclear host error) fail
-the turn instead, so a turn that may have run is never silently repeated.
+If Muse refuses to resume the stored session, the harness starts a new Muse
+session and logs why. Muse runs nothing when it refuses a resume, and the
+OpenClaw transcript keeps the conversation. This covers a session that no
+longer exists and a retained session Muse can no longer open (for example, one
+created with a permission profile that needs the subscription's automated
+reviewer after `muse logout`). Transport failures, and sessions Muse reports as
+in use or overloaded, fail the turn instead, so a turn that may still be
+running is never repeated.
 
 `/new` and `/reset` stop an active Muse turn and delete the binding.
 
@@ -224,13 +234,36 @@ Two gated live suites run against the real `muse` binary
 OPENCLAW_MUSE_LIVE_HOST=1 node scripts/run-vitest.mjs \
   --config test/vitest/vitest.live.config.ts extensions/muse/src/runtime.live.test.ts
 
-# Real model turn: uses OPENCLAW_MUSE_LIVE_KEY, or Muse's own sign-in when unset
+# Real model turn: uses OPENCLAW_MUSE_LIVE_KEY, or a file-backed Muse login
+# (`TBH_CREDENTIAL_BACKEND=file muse login`) staged from OPENCLAW_MUSE_LIVE_CONFIG_HOME
 OPENCLAW_MUSE_LIVE_TEST=1 OPENCLAW_MUSE_LIVE_KEY=<key> node scripts/run-vitest.mjs \
   --config test/vitest/vitest.live.config.ts extensions/muse/src/runtime.live.test.ts
 ```
 
 `OPENCLAW_MUSE_LIVE_MODEL` selects the model for the real turn (default
 `muse-spark-1.3`).
+
+Package-installed Docker coverage uses disposable Gateways and container-only
+credentials (no host auth files are mounted):
+
+```bash
+# Offline after setup: fake MSP boundary, session reuse/restart/reset,
+# approval allow/deny, and restrictive-policy refusal.
+pnpm test:docker:muse-runtime
+
+# Real Muse: approve the printed MUSE_DEVICE_CODE in the browser.
+OPENCLAW_MUSE_LIVE_AUTH=device pnpm test:docker:live-muse
+
+# Or use an API key passed only into the container.
+OPENCLAW_MUSE_LIVE_KEY=<key> pnpm test:docker:live-muse
+```
+
+The live lane is opt-in only, including in the Docker scheduler:
+`OPENCLAW_DOCKER_ALL_LANES=live-muse pnpm test:docker:all`. It verifies a real
+reply, native session recall after a Gateway restart, an allow-once shell
+approval, and an actionable sign-in error in the Gateway log after `muse logout`. Device
+login waits up to ten minutes. `META_API_KEY` is also accepted in API-key mode;
+device mode ignores host keys. All credentials disappear with the container.
 
 ## Related
 

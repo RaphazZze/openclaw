@@ -135,6 +135,18 @@ function publishedUpgradeSurvivorLane(
 }
 
 describe("scripts/lib/docker-e2e-plan", () => {
+  it("selects Muse live only explicitly and keeps deterministic Muse in the default plan", () => {
+    const defaults = planFor();
+    expect(defaults.lanes.some((lane) => lane.name === "muse-runtime")).toBe(true);
+    expect(
+      [...defaults.lanes, ...defaults.tailLanes].some((lane) => lane.name === "live-muse"),
+    ).toBe(false);
+    const live = requireFirstLane(planFor({ selectedLaneNames: ["live-muse"] }));
+    expect(live.name).toBe("live-muse");
+    expect(live.live).toBe(true);
+    expect(live.resources).toContain("live:meta");
+  });
+
   function commitTarget(root: string) {
     const git = (...args: string[]) =>
       execFileSync(

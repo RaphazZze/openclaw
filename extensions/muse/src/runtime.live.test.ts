@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isLiveTestEnabled } from "openclaw/plugin-sdk/test-live";
@@ -68,7 +68,17 @@ describeModel("real Muse model", () => {
   it("completes a short streaming model turn", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "openclaw-muse-model-"));
     const pool = new MusePool(process.env.OPENCLAW_MUSE_BIN ?? "muse");
-    // No key means an explicitly enabled operator's existing Muse CLI login.
+    // The test runner isolates XDG_CONFIG_HOME, so a file-backed Muse login
+    // (`TBH_CREDENTIAL_BACKEND=file muse login`) is staged from its config dir.
+    const loginConfigHome = process.env.OPENCLAW_MUSE_LIVE_CONFIG_HOME;
+    if (loginConfigHome && process.env.XDG_CONFIG_HOME) {
+      await mkdir(join(process.env.XDG_CONFIG_HOME, "muse"), { recursive: true });
+      await copyFile(
+        join(loginConfigHome, "muse", "auth.json"),
+        join(process.env.XDG_CONFIG_HOME, "muse", "auth.json"),
+      );
+      process.env.TBH_CREDENTIAL_BACKEND = "file";
+    }
     const lease = await pool.acquire(workspace, process.env.OPENCLAW_MUSE_LIVE_KEY, true);
     try {
       const session = await openMuseSession(lease.runtime, {

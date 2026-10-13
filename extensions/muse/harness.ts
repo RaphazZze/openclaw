@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import type { Session, Turn } from "@muse-code/sdk";
 import {
+  AgentHarnessPreflightError,
   agentHarnessAttemptTerminal,
   clearActiveEmbeddedRun,
   setActiveEmbeddedRun,
@@ -11,6 +12,8 @@ import {
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { KeyedAsyncQueue } from "openclaw/plugin-sdk/keyed-async-queue";
+import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
+import type { PluginLogger } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginStateKeyedStore } from "openclaw/plugin-sdk/plugin-state-runtime";
 import { resolveApiKeyForProvider } from "openclaw/plugin-sdk/provider-auth-runtime";
 import {
@@ -26,7 +29,13 @@ export type MuseSessionBinding = { sessionId: string; compatibility: string };
 export type MuseHarnessOptions = {
   binaryPath?: string;
   sessionStore: Pick<PluginStateKeyedStore<MuseSessionBinding>, "lookup" | "register" | "delete">;
+  logger?: Pick<PluginLogger, "warn">;
 };
+
+/** Configuration Muse cannot honor; the message is safe and actionable for the chat user. */
+function museRefusal(message: string): AgentHarnessPreflightError {
+  return new AgentHarnessPreflightError(message, { scope: "harness", userMessage: message });
+}
 
 export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnessV2 {
   const pool = new MusePool(options.binaryPath);
@@ -49,12 +58,14 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         params.requireWorkspaceOnly ||
         params.pluginHarnessToolPolicyRestricted
       ) {
-        throw new Error(
+        throw museRefusal(
           "Muse cannot enforce this OpenClaw sandbox or tool policy. Select the openclaw runtime for this session.",
         );
       }
       if (params.thinkLevel === "adaptive") {
-        throw new Error("Muse does not support adaptive reasoning; choose a fixed thinking level.");
+        throw museRefusal(
+          "Muse does not support adaptive reasoning; choose a fixed thinking level.",
+        );
       }
       const target = params.sessionTarget;
       if (!target?.sessionId || !target.sessionKey || !target.storePath) {
@@ -78,7 +89,7 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
           signal: params.abortSignal,
         });
         if (!auth.apiKey) {
-          throw new Error("The selected meta auth profile has no API key usable by Muse.");
+          throw museRefusal("The selected meta auth profile has no API key usable by Muse.");
         }
         apiKey = auth.apiKey;
       }
@@ -88,10 +99,12 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
       const security = params.execOverrides?.security ?? params.config?.tools?.exec?.security;
       const ask = params.execOverrides?.ask ?? params.config?.tools?.exec?.ask;
       if (security === "allowlist") {
-        throw new Error("Muse cannot enforce OpenClaw's exec allowlist. Use the openclaw runtime.");
+        throw museRefusal(
+          "Muse cannot enforce OpenClaw's exec allowlist. Use the openclaw runtime.",
+        );
       }
       if (ask === "always") {
-        throw new Error(
+        throw museRefusal(
           "Muse cannot enforce exec ask: always for every native command. Use ask: on-miss/default, or the openclaw runtime.",
         );
       }
@@ -181,12 +194,17 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         abort,
       };
       signal?.addEventListener("abort", onAbort, { once: true });
-      const timer = setTimeout(() => {
-        timedOut = true;
-        params.onAttemptTimeout?.(new Error("Muse turn timed out"));
-        onAbort();
-      }, params.timeoutMs);
-      timer.unref();
+      // Gateway turns pass an unlimited budget as a value at or above the
+      // largest Node timer; setTimeout would overflow it into an immediate fire.
+      const timer =
+        params.timeoutMs < MAX_TIMER_TIMEOUT_MS
+          ? setTimeout(() => {
+              timedOut = true;
+              params.onAttemptTimeout?.(new Error("Muse turn timed out"));
+              onAbort();
+            }, params.timeoutMs)
+          : undefined;
+      timer?.unref();
       try {
         assertDispatchActive();
         const stored = await options.sessionStore.lookup(params.sessionId);
@@ -201,6 +219,9 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
           modelId: params.modelId,
           approvalMode,
           mcpServers,
+          onResumeRefused: (message) => {
+            options.logger?.warn(`${message}; started a new Muse session.`);
+          },
         });
         assertDispatchActive();
         await options.sessionStore.register(params.sessionId, {
@@ -209,8 +230,14 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         });
         session.onApproval(createApprovalHandler(params));
         session.onApprovalError((error) => {
-          failure = new Error(`Muse approval failed: ${error.kind}`);
-          void abort().catch(() => runtime.close());
+          failure = new Error(
+            `Muse approval failed (${error.kind}): ${
+              error.kind === "unofferedChoice"
+                ? `choice ${error.choiceId} was not offered`
+                : formatErrorMessage(error.error)
+            }`,
+          );
+          void stop().catch(() => runtime.close());
         });
         assertDispatchActive();
         await params.userTurnTranscriptRecorder?.persistApproved();
@@ -265,13 +292,18 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
           throw new Error(`Muse turn ended without a terminal result (${result.outcome.kind}).`);
         }
         if (result.outcome.params.terminal === "failed") {
+          const turnError = result.outcome.params.error;
           throw new Error(
-            result.outcome.params.error?.message ??
-              result.outcome.params.reason ??
-              "Muse model request failed. Run muse to check login and model access.",
+            turnError?.kind === "authRequired"
+              ? `Muse Code is not signed in on the Gateway host (${turnError.message}). Run \`muse login\` there, or set META_API_KEY for the Gateway.`
+              : (turnError?.message ??
+                  result.outcome.params.reason ??
+                  "Muse model request failed. Run muse to check login and model access."),
           );
         }
-        if (result.outcome.params.terminal === "cancelled") {
+        // A cancellation the harness started for a failure (such as an approval
+        // error) reports that failure, not an external abort.
+        if (result.outcome.params.terminal === "cancelled" && !failure) {
           aborted = true;
         }
       } catch (error) {
@@ -298,14 +330,19 @@ export function createMuseAgentHarness(options: MuseHarnessOptions): AgentHarnes
         : aborted
           ? { kind: "aborted" as const, source: "external" as const }
           : { kind: "ok" as const };
-      const terminal = failure
+      const failureMessage = failure
+        ? // Muse reports credential rejection (for example an invalid
+          // META_API_KEY) only on stderr; the turn itself says "not logged in".
+          `Muse Code: ${formatErrorMessage(failure)}${runtime.host.child.stderrTail.length ? `\nRecent Muse stderr:\n${runtime.host.child.stderrTail.slice(-5).join("\n")}` : ""}`
+        : undefined;
+      if (failureMessage) {
+        // Chat surfaces show a generic failure; the Gateway log keeps the actionable cause.
+        options.logger?.warn(failureMessage);
+      }
+      const terminal = failureMessage
         ? agentHarnessAttemptTerminal.setFailure(interruption, {
             source: "prompt",
-            error: new Error(
-              // Muse reports credential rejection (for example an invalid
-              // META_API_KEY) only on stderr; the turn itself says "not logged in".
-              `Muse Code: ${formatErrorMessage(failure)}${runtime.host.child.stderrTail.length ? `\nRecent Muse stderr:\n${runtime.host.child.stderrTail.slice(-5).join("\n")}` : ""}`,
-            ),
+            error: new Error(failureMessage),
           })
         : interruption;
       const lastAssistant = messages.findLast((message) => message.role === "assistant");

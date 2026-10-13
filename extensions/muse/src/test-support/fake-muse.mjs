@@ -1,6 +1,15 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { EXPECTED_SCHEMA_FINGERPRINT } from "@muse-code/sdk";
+
+if (process.env.MUSE_REQUEST_LOG) {
+  appendFileSync(
+    process.env.MUSE_REQUEST_LOG,
+    `${JSON.stringify({ event: "spawn", pid: process.pid, args: process.argv.slice(2) })}\n`,
+  );
+}
 
 let cursor = 0;
 let sessionCount = 0;
@@ -69,6 +78,9 @@ function answer() {
   complete("completed");
 }
 createInterface({ input: process.stdin }).on("line", (line) => {
+  if (process.env.MUSE_REQUEST_LOG) {
+    appendFileSync(process.env.MUSE_REQUEST_LOG, `${line}\n`);
+  }
   const { id, method, params = {} } = JSON.parse(line);
   if (method === "initialized") {
     return;
@@ -82,7 +94,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       platformOs: "linux",
     });
   } else if (method === "session/start") {
-    const sessionId = `session-${++sessionCount}`;
+    const sessionId = process.env.MUSE_REQUEST_LOG ? randomUUID() : `session-${++sessionCount}`;
     sessions.set(sessionId, false);
     reply(id, { session: { sessionId }, viewCursor: String(cursor) });
   } else if (method === "session/resume") {
@@ -90,6 +102,25 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       send({
         id,
         error: { code: -32020, message: "session not found", data: { kind: "sessionNotFound" } },
+      });
+      return;
+    }
+    if (params.sessionId === "refused-session") {
+      // Muse 1.3 refuses a retained session it can no longer compose as `internal`.
+      send({
+        id,
+        error: {
+          code: -32603,
+          message: "retained session refused (class c)",
+          data: { kind: "internal" },
+        },
+      });
+      return;
+    }
+    if (params.sessionId === "busy-session") {
+      send({
+        id,
+        error: { code: -32021, message: "session in use", data: { kind: "sessionInUse" } },
       });
       return;
     }
@@ -103,7 +134,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     active = {
       sessionId: params.sessionId,
       turnId: params.commandId,
-      prompt: params.input[0].text,
+      // Gateway turns wrap the user text in OpenClaw context, so Docker prompts
+      // carry an explicit `fixture:<keyword>` marker; direct tests send the bare keyword.
+      prompt:
+        /\bfixture:([a-z]+)\b/u.exec(params.input[0].text)?.[1] ?? params.input[0].text.trim(),
       resumed: sessions.get(params.sessionId),
       reasoningEffort: params.reasoningEffort,
     };
@@ -125,17 +159,25 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           message: "fixture provider rejected authentication",
           retryable: false,
         });
+      } else if (active.prompt === "loggedout") {
+        // Muse 1.3 reports a missing credential this way.
+        complete("failed", {
+          kind: "authRequired",
+          message: "not logged in: run /login to add an API key",
+          retryable: false,
+        });
       } else if (active.prompt === "approval") {
         event("approval/requested", {
           ...active,
-          approvalId: "approval-1",
-          currentRequirementId: { approvalId: "approval-1", sourceIndex: 0 },
+          // Real Muse mints one approval id per request; the SDK ignores repeats.
+          approvalId: `approval-${active.turnId}`,
+          currentRequirementId: { approvalId: `approval-${active.turnId}`, sourceIndex: 0 },
           availableChoices: [
             { choiceId: "server-allow-id", decision: "approved", scope: "once", label: "Allow" },
             { choiceId: "server-deny-id", decision: "denied", scope: "once", label: "Deny" },
           ],
-          itemId: "tool-1",
-          toolCallId: "call-1",
+          itemId: `tool-${active.turnId}`,
+          toolCallId: `call-${active.turnId}`,
           toolName: "shell",
           rawArgs: '{"command":"pwd"}',
           subject: { kind: "command", command: "pwd" },

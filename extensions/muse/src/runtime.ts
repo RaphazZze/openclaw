@@ -18,6 +18,14 @@ export type MuseOpenSession = {
   modelId: string;
   approvalMode: "allowAll" | "promptUnmatched" | "denyUnmatched";
   mcpServers: Record<string, MuseMcpServer>;
+  /** Reports a refused resume that was replaced by a new Muse session. */
+  onResumeRefused?: (message: string) => void;
+};
+const RESUME_RETRY_KINDS: Record<string, true> = {
+  sessionInUse: true,
+  overloaded: true,
+  backpressured: true,
+  interrupted: true,
 };
 export type MuseRuntime = {
   host: SpawnedMspConnection;
@@ -69,11 +77,18 @@ export async function openMuseSession(runtime: MuseRuntime, options: MuseOpenSes
         excludeItems: true,
       });
     } catch (error) {
-      // A definitive missing-session refusal permits a new root. Never retry an
-      // ambiguous transport failure or an authorization failure as a fresh turn.
-      if (!(error instanceof MspError) || error.kind !== "sessionNotFound") {
-        throw error;
+      // A server-authored refusal means Muse ran nothing, so a new root session
+      // is safe (the OpenClaw transcript keeps the conversation). Transport
+      // failures stay ambiguous, and an in-use or overloaded session may still
+      // be live elsewhere, so those fail the turn instead.
+      if (!(error instanceof MspError) || RESUME_RETRY_KINDS[error.kind]) {
+        throw error instanceof MspError
+          ? new Error(`Muse refused to resume session (${error.kind}): ${error.message}`, {
+              cause: error,
+            })
+          : error;
       }
+      options.onResumeRefused?.(`Muse could not resume session (${error.kind}): ${error.message}`);
       result = await connection.command("session/start", {
         workspaceRoot: options.workspace,
         modelId: options.modelId,

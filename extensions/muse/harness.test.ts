@@ -253,7 +253,38 @@ describe("Muse native MSP harness", () => {
     }
   });
 
-  it("recovers only a definitively missing resumed session", async () => {
+  it.each([
+    ["missing", "missing-session"],
+    ["refused", "refused-session"],
+  ])(
+    "starts a new native session when Muse definitively refuses a %s resume",
+    async (_name, id) => {
+      const state = setup();
+      try {
+        await state.harness.runAttempt(state.params);
+      } finally {
+        await state.harness.dispose?.();
+      }
+      const binding = state.bindings.get(state.params.sessionId)!;
+      state.bindings.set(state.params.sessionId, { ...binding, sessionId: id });
+      const warn = vi.fn();
+      const next = createMuseAgentHarness({
+        binaryPath: fixture,
+        sessionStore: state.sessionStore,
+        logger: { warn },
+      });
+      try {
+        const result = await next.runAttempt(state.params);
+        expect(result.terminal.kind).toBe("ok");
+        expect(result.assistantTexts).toEqual(["started: hello"]);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("started a new Muse session"));
+      } finally {
+        await next.dispose?.();
+      }
+    },
+  );
+
+  it("does not replace a session that is in use elsewhere", async () => {
     const state = setup();
     try {
       await state.harness.runAttempt(state.params);
@@ -261,12 +292,15 @@ describe("Muse native MSP harness", () => {
       await state.harness.dispose?.();
     }
     const binding = state.bindings.get(state.params.sessionId)!;
-    state.bindings.set(state.params.sessionId, { ...binding, sessionId: "missing-session" });
+    state.bindings.set(state.params.sessionId, { ...binding, sessionId: "busy-session" });
     const next = createMuseAgentHarness({ binaryPath: fixture, sessionStore: state.sessionStore });
     try {
       const result = await next.runAttempt(state.params);
-      expect(result.terminal.kind).toBe("ok");
-      expect(result.assistantTexts).toEqual(["started: hello"]);
+      expect(result.terminal).toMatchObject({
+        kind: "failed",
+        error: expect.objectContaining({ message: expect.stringContaining("sessionInUse") }),
+      });
+      expect(state.bindings.get(state.params.sessionId)?.sessionId).toBe("busy-session");
     } finally {
       await next.dispose?.();
     }
@@ -285,6 +319,62 @@ describe("Muse native MSP harness", () => {
         error: expect.objectContaining({ message: expect.stringContaining("denied") }),
       });
       expect(result.assistantTexts).toEqual([]);
+    } finally {
+      await harness.dispose?.();
+    }
+  });
+
+  it("reports an approval transport failure as the turn error, not an abort", async () => {
+    const { harness, params } = setup();
+    params.hostCapabilities = {
+      ...params.hostCapabilities,
+      requestApproval: async () => {
+        throw new Error("approval gateway unavailable");
+      },
+    };
+    try {
+      const result = await harness.runAttempt({ ...params, prompt: "approval" });
+      expect(result.terminal).toMatchObject({
+        kind: "failed",
+        error: expect.objectContaining({
+          message: expect.stringContaining("approval gateway unavailable"),
+        }),
+      });
+    } finally {
+      await harness.dispose?.();
+    }
+  });
+
+  it("explains a missing Muse sign-in and logs it for operators", async () => {
+    const { params, sessionStore } = setup();
+    const warn = vi.fn();
+    const harness = createMuseAgentHarness({ binaryPath: fixture, sessionStore, logger: { warn } });
+    try {
+      const result = await harness.runAttempt({ ...params, prompt: "loggedout" });
+      expect(result.terminal).toMatchObject({
+        kind: "failed",
+        error: expect.objectContaining({ message: expect.stringContaining("muse login") }),
+      });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Muse Code is not signed in on the Gateway host"),
+      );
+    } finally {
+      await harness.dispose?.();
+    }
+  });
+
+  it("treats an unlimited Gateway budget as no deadline and bounds the approval wait", async () => {
+    const { harness, params } = setup();
+    try {
+      const result = await harness.runAttempt({
+        ...params,
+        prompt: "approval",
+        timeoutMs: 2 ** 31,
+      });
+      expect(result.terminal).toMatchObject({ kind: "ok" });
+      expect(params.hostCapabilities.requestApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ timeoutMs: 120_000 }),
+      );
     } finally {
       await harness.dispose?.();
     }

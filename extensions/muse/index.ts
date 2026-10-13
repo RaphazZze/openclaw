@@ -30,6 +30,7 @@ export default definePluginEntry({
           lookup: (key) => getStore().lookup(key),
           delete: (key) => getStore().delete(key),
         },
+        logger: api.logger,
       }),
     );
   },
