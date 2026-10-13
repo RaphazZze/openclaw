@@ -688,7 +688,10 @@ export async function prepareSessionMutationFacts(
       const pending = [...acquiringReads.values()].flatMap((read) => read.prepareRead() ?? []);
       return pending.length > 0 ? Promise.all(pending).then(() => {}) : undefined;
     };
-    await prepareRead();
+    const pending = prepareRead();
+    if (pending) {
+      await pending;
+    }
     return { storageTarget, bindCreation, prepareRead, readCurrent, release, followRegistration };
   } catch (error) {
     release();

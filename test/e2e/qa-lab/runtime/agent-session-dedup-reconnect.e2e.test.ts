@@ -127,10 +127,13 @@ describe("agent session deduplication across reconnect", () => {
       });
       let gatewayLogs = () => "Gateway startup did not return a ready child.";
       onTestFailed(() => {
-        console.error(
-          "Session dedup reconnect fixture failed",
-          JSON.stringify({ stage, providerRequests: provider.requests.length }),
-          gatewayLogs(),
+        process.stderr.write(
+          [
+            "Session dedup reconnect fixture failed",
+            JSON.stringify({ stage, providerRequests: provider.requests.length }),
+            gatewayLogs(),
+            "",
+          ].join("\n"),
         );
       });
       cleanups.push(() => provider.stop());
