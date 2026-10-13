@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import type { MessagePort, Worker, WorkerOptions } from "node:worker_threads";
 import { afterEach, expect, it, vi } from "vitest";
+import { revokeSqliteDatabaseAdmissionsForPath } from "../../infra/sqlite-database-admission.js";
 import { createDeferredCore, type Deferred } from "../../shared/deferred.js";
 import { hasPersistedOpenClawAgentCanonicalValidation } from "../../state/openclaw-agent-canonical-validation-receipt.js";
 import { assertNoOpenClawAgentDatabaseLeasesReadOnly } from "../../state/openclaw-agent-db-lease.js";
@@ -101,8 +102,11 @@ function seedFleet(env: NodeJS.ProcessEnv, invalidFirst = false) {
       hasPersistedOpenClawAgentCanonicalValidation(openOpenClawAgentDatabase({ agentId, env })),
     ).toBe(false);
   }
-  // Ordinary fixture writes have no durable canonical receipt; clear process-local proof.
+  // Exercise cold certification rather than reusing clean-close admission.
   closeOpenClawAgentDatabasesForTest(env.OPENCLAW_STATE_DIR);
+  for (const agentId of agentIds) {
+    revokeSqliteDatabaseAdmissionsForPath(resolveOpenClawAgentSqlitePath({ agentId, env }));
+  }
   return { agentIds, cfg };
 }
 

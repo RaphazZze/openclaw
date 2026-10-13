@@ -20,14 +20,32 @@ import {
 import type { GatewayClient } from "./server-methods/types.js";
 import { getSessionRowProjection } from "./session-row-projection-access.js";
 import { resolveSessionMutationAuthorizationAsync } from "./session-sharing-authorization-async.js";
-import { resolveSessionSharingTargetAsync } from "./session-sharing.js";
-import { canReceivePreparedSessionEvent } from "./session-sharing.test-utils.js";
+import {
+  canReceiveSessionEvent,
+  prepareProjectedSessionSharing,
+  resolveSessionSharingTargetAsync,
+} from "./session-sharing.js";
 import { resolveGatewaySessionStoreTargetWithStoreAsync } from "./session-utils-store-lookup.js";
 
+const authorizationReleases: Array<() => void> = [];
+
 afterEach(() => {
+  for (const release of authorizationReleases.splice(0)) {
+    release();
+  }
   vi.restoreAllMocks();
   closeOpenClawAgentDatabasesForTest();
 });
+
+async function captureMutationAuthorization(
+  params: Parameters<typeof resolveSessionMutationAuthorizationAsync>[0],
+) {
+  const result = await resolveSessionMutationAuthorizationAsync(params);
+  if (result.authorization?.release) {
+    authorizationReleases.push(result.authorization.release);
+  }
+  return result;
+}
 
 function identifiedClient(userId: string): GatewayClient {
   return {
@@ -90,15 +108,15 @@ describe("session event authorization store work", () => {
         storePath: target.storePath,
         sessionId: entry.sessionId,
       };
-      const original = await resolveSessionMutationAuthorizationAsync({
+      const original = await captureMutationAuthorization({
         ...params,
         expectedTarget,
       });
       expect(original.error).toBeNull();
       expect(original.authorization).toBeDefined();
       await sessionAccessor.upsertSessionEntryCore(scope, { ...entry, sessionId: "replacement" });
-      expect((await resolveSessionMutationAuthorizationAsync(params)).error).toBeNull();
-      const replacement = await resolveSessionMutationAuthorizationAsync({
+      expect((await captureMutationAuthorization(params)).error).toBeNull();
+      const replacement = await captureMutationAuthorization({
         ...params,
         expectedTarget,
       });
@@ -143,21 +161,37 @@ describe("session event authorization store work", () => {
           projection: "list",
         });
         const materializedKeys: string[] = [];
+        const context = requestContext({});
+        await initializeSessionReadContext(context);
+        const projection = getSessionRowProjection(context)!;
+        await projection.ensureMaterialized();
+        await projection.prepareMembership();
         const listEntries = sessionAccessor.listSessionEntriesCore;
         vi.spyOn(sessionAccessor, "listSessionEntriesCore").mockImplementation((scope) => {
           const entries = listEntries(scope);
           materializedKeys.push(...entries.map(({ sessionKey }) => sessionKey));
           return entries;
         });
-        const receive = (user: string, event = "session.suggestion") =>
-          canReceivePreparedSessionEvent({
+        const receive = (user: string, event = "session.suggestion") => {
+          const client = identifiedClient(user);
+          return canReceiveSessionEvent({
             cfg: {},
-            client: identifiedClient(user),
+            client,
             sessionKeys,
             event,
             payload: { suggestion: { author: { id: "author" } } },
+            prepared: {
+              sharing: prepareProjectedSessionSharing({
+                cfg: {},
+                client,
+                isMember: (target, id) =>
+                  projection.hasMembership(target.storePath, target.storeKey, id),
+              }),
+              target: (key) => projection.sharingTarget({ key, agentId: "main" }),
+            },
           });
-        expect(await receive("member", "session.message")).toBe(true);
+        };
+        expect(receive("member", "session.message")).toBe(true);
         materializedKeys.length = 0;
         expect(await receive("member", "session.message")).toBe(true);
         expect(materializedKeys).toEqual([]);
@@ -205,8 +239,11 @@ describe("session mutation authorization store caches", () => {
           clone: false,
           projection: "list",
         });
+        const context = requestContext({});
+        await initializeSessionReadContext(context);
+        await getSessionRowProjection(context)!.prepareMembership();
         const inventory = vi.spyOn(sessionAccessor, "listSessionEntriesCore");
-        const result = await resolveSessionMutationAuthorizationAsync({
+        const result = await captureMutationAuthorization({
           client: identifiedClient("viewer@example.test"),
           method,
           requestParams:
@@ -215,7 +252,7 @@ describe("session mutation authorization store caches", () => {
               : method === "sessions.patch"
                 ? { key: sessionKey, unread: false }
                 : { sessionKey },
-          context: { chatAbortControllers: new Map(), getRuntimeConfig: () => ({}) } as never,
+          context,
         });
         expect(result.error).toBeNull();
         expect(result.authorization).toBeDefined();
@@ -318,9 +355,11 @@ describe("session mutation authorization store caches", () => {
             },
           );
         }
-        const context = { chatAbortControllers: new Map(), getRuntimeConfig: () => cfg } as never;
+        const context = requestContext(cfg);
+        await initializeSessionReadContext(context);
+        await getSessionRowProjection(context)!.prepareMembership();
         const client = identifiedClient(`${viewer}@example.test`);
-        const scoped = await resolveSessionMutationAuthorizationAsync({
+        const scoped = await captureMutationAuthorization({
           client,
           method: "sessions.github.publish",
           requestParams: { sessionKey: "global", agentId: "research" },
@@ -333,7 +372,7 @@ describe("session mutation authorization store caches", () => {
             details: { code: "SESSION_PARTICIPATION_REQUIRED" },
           });
         }
-        const alias = await resolveSessionMutationAuthorizationAsync({
+        const alias = await captureMutationAuthorization({
           client,
           method: "sessions.github.publish",
           requestParams: { sessionKey: "agent:research:main" },
@@ -361,7 +400,7 @@ describe("session mutation authorization store caches", () => {
         { agentId: "main", sessionKey },
         { sessionId: "session-incognito", updatedAt: 1, incognito: true },
       );
-      const result = await resolveSessionMutationAuthorizationAsync({
+      const result = await captureMutationAuthorization({
         client: identifiedClient("viewer@example.com"),
         method: "sessions.patchMany",
         requestParams: {
@@ -393,14 +432,17 @@ describe("session mutation authorization store caches", () => {
         },
       );
 
-      const result = await resolveSessionMutationAuthorizationAsync({
+      const context = requestContext({});
+      await initializeSessionReadContext(context);
+      await getSessionRowProjection(context)!.prepareMembership();
+      const result = await captureMutationAuthorization({
         client: identifiedClient("viewer@example.com"),
         method: "sessions.patchMany",
         requestParams: {
           targets: [{ key: sharedKey }, { key: draftKey }],
           patch: { unread: false },
         },
-        context: { chatAbortControllers: new Map(), getRuntimeConfig: () => ({}) } as never,
+        context,
       });
 
       expect(result.authorization).toBeUndefined();
@@ -426,14 +468,17 @@ describe("session mutation authorization store caches", () => {
         },
       );
       const target = { sessionKey: ` ${sessionKey} `, agentId: " main " };
-      const result = await resolveSessionMutationAuthorizationAsync({
+      const context = requestContext({});
+      await initializeSessionReadContext(context);
+      await getSessionRowProjection(context)!.prepareMembership();
+      const result = await captureMutationAuthorization({
         client: identifiedClient("viewer@example.com"),
         method: "sessions.patchMany",
         requestParams: {
           targets: [{ key: target.sessionKey, agentId: target.agentId }],
           patch: { unread: false },
         },
-        context: { chatAbortControllers: new Map(), getRuntimeConfig: () => ({}) } as never,
+        context,
       });
 
       expect(result.error).toBeNull();
@@ -468,7 +513,7 @@ describe("session mutation authorization store caches", () => {
       }));
       targets.push({ key: hiddenKey });
 
-      const result = await resolveSessionMutationAuthorizationAsync({
+      const result = await captureMutationAuthorization({
         client: identifiedClient("viewer@example.com"),
         method: "sessions.patchMany",
         requestParams: { targets, patch: { archived: true } },
@@ -515,7 +560,7 @@ describe("session mutation authorization store caches", () => {
 
       expect(
         (
-          await resolveSessionMutationAuthorizationAsync({
+          await captureMutationAuthorization({
             client: identifiedClient("viewer@example.com"),
             method: "sessions.groups.delete",
             requestParams: { name: "Cache Test" },

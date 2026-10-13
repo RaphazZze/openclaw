@@ -14,6 +14,7 @@ import {
 } from "../../../test/helpers/temp-dir.js";
 import { clearNodeSqliteKyselyCacheForDatabase } from "../../infra/kysely-sync.js";
 import { openNodeSqliteDatabase } from "../../infra/node-sqlite.js";
+import { revokeSqliteDatabaseAdmissionsForPath } from "../../infra/sqlite-database-admission.js";
 import { withOpenClawAgentDatabaseReadOnly } from "../../state/openclaw-agent-db-readonly.js";
 import {
   closeOpenClawAgentDatabaseByPathAsync,
@@ -429,6 +430,7 @@ describe("session accessor readonly listing", () => {
     );
 
     closeOpenClawAgentDatabasesForTest();
+    revokeSqliteDatabaseAdmissionsForPath(database.path);
     expect(() => readSessionStoreSummaryReadOnly(scope, options)).toThrow("openclaw doctor --fix");
     expect(
       loadExactSessionEntryCandidatesReadOnlyBatch(

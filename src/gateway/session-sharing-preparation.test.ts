@@ -16,10 +16,7 @@ import * as entryReads from "../config/sessions/session-entry-read-runtime.js";
 import { addSessionMember, removeSessionMember } from "../config/sessions/session-sharing-store.js";
 import * as sharingKernel from "../config/sessions/session-sharing-store.kernel.js";
 import type { SessionEntry } from "../config/sessions/types.js";
-import {
-  assertExistingDatabaseIdentity,
-  readDatabaseIdentityBirthtime,
-} from "../infra/sqlite-worker-identity.js";
+import { readDatabaseIdentityBirthtime } from "../infra/sqlite-worker-identity.js";
 import { sessionChanges } from "../sessions/session-row-changes.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { getOpenIncognitoAgentDatabase } from "../state/openclaw-agent-db-lifecycle.js";
@@ -51,95 +48,21 @@ const unavailableMessage =
 
 function expectWithoutHostSql(action: () => void) {
   const sql = observeHostDataSql();
+  const stat = vi.spyOn(fs, "statSync");
+  const fstat = vi.spyOn(fs, "fstatSync");
+  syncBuiltinESMExports();
   try {
     action();
-    for (const call of sql.calls) {
+    for (const call of [...sql.calls, stat, fstat]) {
       expect(call).not.toHaveBeenCalled();
     }
   } finally {
+    stat.mockRestore();
+    fstat.mockRestore();
+    syncBuiltinESMExports();
     sql.restore();
   }
 }
-
-it("enforces host birthtime identity across same-inode replacement and registration", async () => {
-  await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
-    const storePath = state.statePath("sharing-birthtime.sqlite");
-    const cfg = {
-      ...rolePolicyConfig(),
-      agents: { entries: { main: {} } },
-      session: { store: storePath },
-    };
-    const sessionKey = "agent:main:birthtime-replacement";
-    const scope = { agentId: "main", storePath, sessionKey };
-    replaceSessionEntrySync(scope, {
-      sessionId: "original",
-      lifecycleRevision: "original-lifecycle",
-      updatedAt: 1,
-      visibility: "read-only",
-      sandbox: "required",
-      createdActor: { type: "human", source: "profile", id: "creator" },
-    });
-    await addSessionMember(scope, { identityId: "requester", addedBy: "creator" });
-    const prepared = await prepareSessionMutationFacts({ cfg, sessionKey, agentId: "main" });
-    const client = sharingPolicyClient({
-      user: "requester",
-      scopes: ["operator.read", "operator.write"],
-    });
-    const policy = { ...cfg.gateway!.roles!.definitions.view!, sandbox: "required" as const };
-    const authorize = () =>
-      authorizePreparedSessionMutation(
-        { cfg, client, sessionKey, agentId: "main" },
-        prepared.readCurrent(cfg),
-        { policy, aliases: new Set(["requester"]) },
-      );
-    const original = fs.statSync(storePath, { bigint: true });
-    const statSync = fs.statSync;
-    let replaced = false;
-    const stat = vi.spyOn(fs, "statSync").mockImplementation((...args) => {
-      const file = statSync(...args);
-      if (replaced && String(args[0]) === storePath && file && "birthtimeNs" in file) {
-        file.birthtimeNs = original.birthtimeNs + 1n;
-      }
-      return file;
-    });
-    try {
-      syncBuiltinESMExports();
-      expect(authorize()).toBeNull();
-      replaced = true;
-      const replacement = fs.statSync(storePath, { bigint: true });
-      expect([replacement.dev, replacement.ino]).toEqual([original.dev, original.ino]);
-      expect(replacement.birthtimeNs).not.toBe(original.birthtimeNs);
-      const assertOriginal = () =>
-        assertExistingDatabaseIdentity(
-          storePath,
-          `file:${original.dev}:${original.ino}`,
-          readDatabaseIdentityBirthtime(original),
-        );
-      // Linux cannot distinguish native birthtime from Node's ctime fallback.
-      if (process.platform === "linux") {
-        expect(assertOriginal).not.toThrow();
-      } else {
-        expect(assertOriginal).toThrow(
-          "SQLite database file identity changed before existing-only open",
-        );
-      }
-      for (const registered of [false, true]) {
-        if (registered) {
-          registerOpenClawAgentDatabase({ agentId: "main", path: storePath, env: state.env });
-        }
-        if (process.platform === "linux") {
-          expect(authorize()).toBeNull();
-        } else {
-          expect(authorize).toThrow(unavailableMessage);
-        }
-      }
-    } finally {
-      stat.mockRestore();
-      syncBuiltinESMExports();
-      prepared.release();
-    }
-  });
-});
 
 it("refuses a worker sharing result whose captured birthtime differs from its retained source", async () => {
   await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
@@ -576,9 +499,7 @@ it.each(["durable", "incognito"] as const)(
               visibility: "shared",
               updatedAt: 3,
             });
-            if (kind === "incognito") {
-              expect(() => read.readCurrent(cfg)).toThrow(unavailableMessage);
-            }
+            expect(() => read.readCurrent(cfg)).toThrow(unavailableMessage);
             writeSessionEntry(database, sessionKey, {
               ...target.entry,
               visibility: "draft",

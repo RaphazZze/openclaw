@@ -8,6 +8,7 @@ import {
 import { throwSqliteLifecycleErrors } from "../../infra/sqlite-lifecycle-errors.js";
 import { recordStartupMigrationWarnings } from "../../infra/state-migrations.messages.js";
 import { formatDoctorStateRepairFailure } from "../../infra/state-repair-message.js";
+import { settleCurrentReadPreparations } from "../../shared/current-read-authority.js";
 import { readAgentDatabaseAdmissionRefusal } from "../../state/agent-database-admission.js";
 import {
   createAgentDatabaseDeletionClassifier,
@@ -241,18 +242,21 @@ export async function runSessionStartupMigration(params: {
   assertSessionStoreMigrationComplete({ cfg: params.cfg, env, targets });
   const { assertAcpSessionKeysMigratedForStartup, assertEmbeddedAcpMetadataMigratedForStartup } =
     await import("../../acp/runtime/session-meta-startup.js");
-  if (!params.agentIds) {
-    await assertAcpSessionKeysMigratedForStartup(
-      params.cfg,
-      env,
-      targets.map((target) => target.agentId),
-      undefined,
-      params.assertCurrent,
-    );
-  }
   const migrateLegacyMain =
     params.deps?.migrateLegacyMainSessionKeys ?? migrateLegacyMainSessionKeys;
-  const result = await migrateLegacyMain({ cfg: params.cfg, env, mode: "detect" });
+  // Both inspections are read-only; join them before repair, including on refusal.
+  const [, result] = await settleCurrentReadPreparations([
+    params.agentIds
+      ? undefined
+      : assertAcpSessionKeysMigratedForStartup(
+          params.cfg,
+          env,
+          targets.map((target) => target.agentId),
+          undefined,
+          params.assertCurrent,
+        ),
+    migrateLegacyMain({ cfg: params.cfg, env, mode: "detect" }),
+  ] as const);
   params.assertCurrent?.();
   if (result.warnings.length > 0) {
     params.log.warn(

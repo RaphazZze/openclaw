@@ -660,14 +660,6 @@ export async function prepareSessionMutationFacts(
       }
       assertSource = () => {
         inventoryRead.assertRegistryCurrent();
-        for (const source of preparedSources) {
-          assertExistingDatabaseIdentity(source.path, source.identity, source.birthtime);
-        }
-        for (const read of retainedReads.values()) {
-          if (!read.readCurrent()) {
-            throw new SessionMutationFactsUnavailableError();
-          }
-        }
       };
     }
     const readCurrent = (cfg: OpenClawConfig) => {

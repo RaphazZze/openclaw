@@ -12,7 +12,6 @@ import type { GatewayClient, GatewayRequestContext } from "./server-methods/type
 import { resolveSessionMutationAuthorizationAsync } from "./session-sharing-authorization-async.js";
 import {
   authorizeResolvedSessionMutationAsync,
-  resolveSessionSharingRole,
   resolveSessionSharingTargetAsync,
   SessionMutationAuthorizationChangedError,
 } from "./session-sharing.js";
@@ -67,6 +66,7 @@ describe("session sharing sandbox requirements", () => {
       const guest = sandboxRoleClient("view");
       const maintainer = sandboxRoleClient("write");
       using _ = { [Symbol.dispose]: (await prepareUserProfileCatalog()).release };
+      using authorizations = new DisposableStack();
       const guestId = guest.authenticatedUserProfile!.profileId;
       const maintainerId = maintainer.authenticatedUserProfile!.profileId;
       const hostSessionKey = "agent:main:maintainer-host-session";
@@ -108,7 +108,6 @@ describe("session sharing sandbox requirements", () => {
       if (!hostTarget) {
         throw new Error("expected persisted maintainer session");
       }
-      expect(resolveSessionSharingRole({ cfg, client: guest, target: hostTarget })).toBe("member");
       expect(
         await authorizeResolvedSessionMutationAsync({
           cfg,
@@ -148,28 +147,24 @@ describe("session sharing sandbox requirements", () => {
           method,
         ).toMatchObject({ code: "FORBIDDEN", message: expect.stringMatching(/sandbox/i) });
       }
-      expect(
-        (
-          await resolveSessionMutationAuthorizationAsync({
-            client: guest,
-            method: "sessions.patch",
-            requestParams: { key: hostSessionKey },
-            context,
-          })
-        ).error,
-      ).toBeNull();
+      const patch = await resolveSessionMutationAuthorizationAsync({
+        client: guest,
+        method: "sessions.patch",
+        requestParams: { key: hostSessionKey },
+        context,
+      });
+      authorizations.defer(() => patch.authorization?.release?.());
+      expect(patch.error).toBeNull();
 
       for (const participant of [guest, maintainer]) {
-        expect(
-          (
-            await resolveSessionMutationAuthorizationAsync({
-              client: participant,
-              method: "chat.send",
-              requestParams: { sessionKey: sandboxSessionKey },
-              context,
-            })
-          ).error,
-        ).toBeNull();
+        const sandboxRun = await resolveSessionMutationAuthorizationAsync({
+          client: participant,
+          method: "chat.send",
+          requestParams: { sessionKey: sandboxSessionKey },
+          context,
+        });
+        authorizations.defer(() => sandboxRun.authorization?.release?.());
+        expect(sandboxRun.error).toBeNull();
       }
 
       cfg.gateway!.roles!.definitions.view!.sandbox = "inherit";
@@ -179,6 +174,7 @@ describe("session sharing sandbox requirements", () => {
         requestParams: { sessionKey: hostSessionKey },
         context,
       });
+      authorizations.defer(() => admittedHostRun.authorization?.release?.());
       expect(admittedHostRun.error).toBeNull();
       expect(admittedHostRun.authorization).toBeDefined();
       cfg.gateway!.roles!.definitions.view!.sandbox = "required";
@@ -186,16 +182,14 @@ describe("session sharing sandbox requirements", () => {
         SessionMutationAuthorizationChangedError,
       );
 
-      expect(
-        (
-          await resolveSessionMutationAuthorizationAsync({
-            client: guest,
-            method: "chat.send",
-            requestParams: { sessionKey: hostSessionKey },
-            context: { getRuntimeConfig: () => ({}) } as GatewayRequestContext,
-          })
-        ).error,
-      ).toBeNull();
+      const unscoped = await resolveSessionMutationAuthorizationAsync({
+        client: guest,
+        method: "chat.send",
+        requestParams: { sessionKey: hostSessionKey },
+        context: { getRuntimeConfig: () => ({}) } as GatewayRequestContext,
+      });
+      authorizations.defer(() => unscoped.authorization?.release?.());
+      expect(unscoped.error).toBeNull();
     });
   });
 });

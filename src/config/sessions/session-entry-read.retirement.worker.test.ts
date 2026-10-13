@@ -20,13 +20,8 @@ it.each(["refusal", "eviction"] as const)(
       const sessionKey = "agent:main:ordered-retirement";
       const entry = { sessionId: "ordered-retirement-session", updatedAt: 1 };
       writeSessionEntry(database, sessionKey, entry);
-      // This fixture exercises worker retirement, so discard the write's resident receipt.
-      sessionChanges.emit({
-        sessionKey,
-        agentId: database.agentId,
-        storePath: database.path,
-        factsInvalidated: true,
-      });
+      // The test owns worker settlement, so discard the write's retained row facts.
+      sessionChanges.invalidate({ sessionKey, storePath: database.path, factsInvalidated: true });
       const cleanupEntered = createDeferredCore();
       const releaseCleanup = createDeferredCore();
       const writerSettled = createDeferredCore();
