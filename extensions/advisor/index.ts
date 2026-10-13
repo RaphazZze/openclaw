@@ -9,6 +9,8 @@ import {
 
 const DEFAULT_SCHEDULE: AdvisorSchedule = { everyToolCalls: 10, everyMinutes: 20 };
 const ADVICE_TTL_MS = 24 * 60 * 60 * 1000;
+const RUN_CONTEXT_NAMESPACE = "advisor:admitted-run";
+type AdmittedRun = { agentId: string; startedAt: number };
 
 function resolveSchedule(config: Record<string, unknown> | undefined): AdvisorSchedule {
   const read = (key: keyof AdvisorSchedule) => {
@@ -100,41 +102,49 @@ export default definePluginEntry({
         ctx.sessionKey &&
         ctx.agentId &&
         ctx.runId &&
-        (ctx.trigger === undefined || ctx.trigger === "user" || ctx.trigger === "manual")
+        (ctx.trigger === undefined || ctx.trigger === "user" || ctx.trigger === "manual") &&
+        !api.runContext.getRunContext({ runId: ctx.runId, namespace: RUN_CONTEXT_NAMESPACE })
       ) {
-        controller.runStarted({
-          sessionKey: ctx.sessionKey,
-          agentId: ctx.agentId,
+        // Hooks can run in a workspace registration distinct from the Gateway service.
+        // The host-owned run context carries admission to the service's event subscriber.
+        api.runContext.setRunContext({
           runId: ctx.runId,
+          namespace: RUN_CONTEXT_NAMESPACE,
+          value: { agentId: ctx.agentId, startedAt: Date.now() },
         });
       }
     });
-    // Tool starts, not after_tool_call: Codex fires post-tool hooks only for calls that finish
-    // inside the turn, so stalled or backgrounded commands (the waste worth catching) never count.
+    // Tool starts include stalled/backgrounded calls. Terminal lifecycle handlers can
+    // still read run context; the host clears it only after those handlers settle.
     api.agent.events.registerAgentEventSubscription({
-      id: "advisor-tool-starts",
-      description: "Counts tool calls started in admitted runs for the review trigger.",
-      streams: ["tool"],
-      handle: (event) => {
-        if (event.sessionKey && event.runId && event.data.phase === "start") {
+      id: "advisor-runs",
+      description: "Counts tool starts and closes admitted runs for the review trigger.",
+      streams: ["tool", "lifecycle"],
+      handle: (event, ctx) => {
+        const run = ctx.getRunContext<AdmittedRun>(RUN_CONTEXT_NAMESPACE);
+        if (!run || !event.sessionKey) {
+          return;
+        }
+        controller.runStarted({
+          sessionKey: event.sessionKey,
+          agentId: run.agentId,
+          runId: event.runId,
+          startedAt: run.startedAt,
+        });
+        if (event.stream === "tool" && event.data.phase === "start") {
           controller.toolStarted({ sessionKey: event.sessionKey, runId: event.runId });
+        } else if (
+          event.stream === "lifecycle" &&
+          (event.data.phase === "end" || event.data.phase === "error")
+        ) {
+          controller.turnEnded({
+            sessionKey: event.sessionKey,
+            agentId: run.agentId,
+            runId: event.runId,
+            durationMs: event.ts - run.startedAt,
+          });
         }
       },
-    });
-    api.on("agent_end", (event, ctx) => {
-      if (
-        !ctx.sessionKey ||
-        !ctx.agentId ||
-        (ctx.trigger !== undefined && ctx.trigger !== "user" && ctx.trigger !== "manual")
-      ) {
-        return;
-      }
-      controller.turnEnded({
-        sessionKey: ctx.sessionKey,
-        agentId: ctx.agentId,
-        runId: ctx.runId,
-        durationMs: event.durationMs,
-      });
     });
     api.registerRuntimeLifecycle({
       id: "advisor",

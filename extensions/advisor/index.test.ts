@@ -2,6 +2,7 @@ import type {
   OpenClawPluginApi,
   OpenClawPluginServiceContextV2,
   OpenClawPluginServiceV2,
+  PluginJsonValue,
 } from "openclaw/plugin-sdk/plugin-entry";
 import {
   createGatewaySchedulerClock,
@@ -41,12 +42,26 @@ type PendingReview = {
 
 // The plugin registers these through the typed `api.on`; tests only replay them.
 type CapturedHook = (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown;
+type AgentEventSubscription = Parameters<OpenClawPluginApi["registerAgentEventSubscription"]>[0];
 
 function setup(pluginConfig: Record<string, unknown>) {
   const handlers: Partial<Record<"llm_input" | "agent_end", CapturedHook>> = {};
-  let toolEvents: Parameters<OpenClawPluginApi["registerAgentEventSubscription"]>[0] | undefined;
+  let toolEvents: AgentEventSubscription | undefined;
   const services: OpenClawPluginServiceV2[] = [];
   const lifecycles: Parameters<OpenClawPluginApi["registerRuntimeLifecycle"]>[0][] = [];
+  const runContexts = new Map<string, PluginJsonValue>();
+  const eventContext = (runId: string): Parameters<AgentEventSubscription["handle"]>[1] => ({
+    getRunContext: <T extends PluginJsonValue>(namespace: string) =>
+      runContexts.get(`${runId}:${namespace}`) as T | undefined,
+    setRunContext: (namespace, value) => {
+      runContexts.set(`${runId}:${namespace}`, value);
+    },
+    clearRunContext: (namespace) => {
+      if (namespace) {
+        runContexts.delete(`${runId}:${namespace}`);
+      }
+    },
+  });
   const started = createSignal<PendingReview>();
   const finished = createSignal<void>();
   const forkSession = vi.fn<OpenClawPluginApi["runtime"]["subagent"]["forkSession"]>((params) => {
@@ -92,14 +107,37 @@ function setup(pluginConfig: Record<string, unknown>) {
         services.push(service);
       }
     },
-    on: (name, handler) => {
-      Object.assign(handlers, { [name]: handler });
+    setRunContext: ({ runId, namespace, value }) => {
+      if (value !== undefined) {
+        runContexts.set(`${runId}:${namespace}`, value);
+      }
+      return true;
     },
+    getRunContext: ({ runId, namespace }) => runContexts.get(`${runId}:${namespace}`),
+    on: () => {},
     registerAgentEventSubscription: (subscription) => {
       toolEvents = subscription;
     },
   });
   plugin.register(api);
+  if (services.length > 0) {
+    // The Gateway service and workspace hooks use distinct plugin registrations.
+    plugin.register(
+      createTestPluginApi({
+        id: "advisor",
+        pluginConfig,
+        logger: api.logger,
+        setRunContext: api.setRunContext,
+        getRunContext: api.getRunContext,
+        on: (name, handler) => {
+          Object.assign(handlers, { [name]: handler });
+        },
+        registerService: () => {},
+        registerRuntimeLifecycle: () => {},
+        registerAgentEventSubscription: () => {},
+      }),
+    );
+  }
 
   const clock = createGatewaySchedulerClock();
   const scheduler = createTestPluginServiceScheduler(createTestGatewayScheduler(clock.clock));
@@ -150,13 +188,26 @@ function setup(pluginConfig: Record<string, unknown>) {
           stream: "tool",
           data: { phase: "start", name: "exec" },
         },
-        { getRunContext: () => undefined, setRunContext: () => {}, clearRunContext: () => {} },
+        eventContext(overrides.runId ?? context.runId),
       ),
-    endRun: (durationMs = 1_000, overrides: Partial<typeof context> = {}) =>
-      handlers.agent_end?.(
-        { messages: [], success: true, durationMs },
-        { ...context, ...overrides },
-      ),
+    endRun: (durationMs = 1_000, overrides: Partial<typeof context> = {}) => {
+      const runId = overrides.runId ?? context.runId;
+      const namespace = `${runId}:advisor:admitted-run`;
+      const admission = runContexts.get(namespace) as { startedAt: number } | undefined;
+      const result = toolEvents?.handle(
+        {
+          runId,
+          sessionKey: overrides.sessionKey ?? context.sessionKey,
+          seq: 2,
+          ts: (admission?.startedAt ?? Date.now()) + durationMs,
+          stream: "lifecycle",
+          data: { phase: "end" },
+        },
+        eventContext(runId),
+      );
+      runContexts.delete(namespace);
+      return result;
+    },
     dispatchReview: () => {
       const review = started.next();
       void clock.wake();
@@ -168,6 +219,19 @@ function setup(pluginConfig: Record<string, unknown>) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("advisor", () => {
+  it("shares admission across distinct hook and service registrations", async () => {
+    const run = setup({ everyToolCalls: 1, everyMinutes: 0 });
+    await run.startService();
+    await run.startRun();
+    await run.toolStarted();
+    const review = await run.dispatchReview();
+    expect(run.forkSession).toHaveBeenCalledOnce();
+    const done = run.finished();
+    review.resolve("NO_CHANGE");
+    await done;
+    await run.stopService();
+  });
+
   it.each([true, false])(
     "reviews tool calls mid-run and delivers with active steering=%s",
     async (active) => {

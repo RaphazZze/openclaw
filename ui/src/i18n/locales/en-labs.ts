@@ -32,7 +32,7 @@ const enLabs = {
     advisor: {
       title: "Advisor",
       description:
-        "Every few turns or minutes of agent work, an advisor model reads the conversation's recent work and, if it spots avoidable work (drifting from the request, repeated or stalled tool calls), gives the agent one short correction on its next turn. Adds model calls.",
+        "Every few tool calls or minutes of agent work, Advisor reviews the conversation on the session's own model. If it spots avoidable work (drifting from the request, repeated or stalled tool calls), it offers one short correction to the active run, or the next turn when steering is unavailable. Adds model calls.",
     },
     chatBubbles: {
       title: "Speech bubbles",

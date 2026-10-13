@@ -24,8 +24,9 @@ button opens the plugin's settings page. Or use config:
 
 `everyToolCalls` counts tool calls as they start, including commands that are
 still running in the background. `everyMinutes` counts accumulated agent run
-time, checked as tools start and when a run ends. Either trigger
-starts a review; `0` disables a trigger. Both counters restart after a review.
+time, including model work before the first tool call, checked as tools start
+and when a run ends. Either trigger starts a review; `0` disables a trigger.
+Both counters restart after a review.
 Heartbeat, cron, memory-flush, overflow, and side-question runs do not count.
 
 Reviews keep the session's model and context; there is no separate model setting.

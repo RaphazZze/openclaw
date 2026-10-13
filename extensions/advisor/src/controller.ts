@@ -121,13 +121,18 @@ export function createAdvisorController(deps: AdvisorDeps) {
   }
 
   return {
-    runStarted(params: { sessionKey: string; agentId: string; runId: string }): void {
+    runStarted(params: {
+      sessionKey: string;
+      agentId: string;
+      runId: string;
+      startedAt: number;
+    }): void {
       const state = stateFor(params.sessionKey);
       if (state.run?.id !== params.runId) {
         state.run = {
           id: params.runId,
           agentId: params.agentId,
-          startedAt: Date.now(),
+          startedAt: params.startedAt,
           accountedMs: 0,
         };
       }
