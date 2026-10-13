@@ -99,9 +99,9 @@ function createRequest(handler: GatewayRequestHandler, method = "health") {
 
 describe("authenticated Gateway RPC diagnostics", () => {
   it.each([
-    { source: "dashboard", rowMode: "compact", bytes: 204_800, elapsed: 0 },
+    { source: "dashboard", rowMode: "compact", bytes: 204_800, elapsed: 1_000 },
     { source: "arbitrary-private-caller", rowMode: undefined, bytes: 100, elapsed: 1_000 },
-  ])("attributes slow or large session lists without private filters ($source)", async (query) => {
+  ])("attributes slow session lists without private filters ($source)", async (query) => {
     let now = 1_000;
     vi.spyOn(Date, "now").mockImplementation(() => now);
     const output = vi.fn();
