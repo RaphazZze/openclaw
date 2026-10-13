@@ -77,6 +77,9 @@ describe("active-memory escalation", () => {
     "Hier je t'ai dit que je partais demain",
     "tu te souviens de ce quon a decide la semaine derniere ?",
     "Qu’est-ce qu’on a dit pour Kyoto ?",
+    "Tu te souviens d'avoir parlé de Kyoto ?",
+    "Tu te souviens de notre voyage à Kyoto ?",
+    "Tu te souviens de Pierre ?",
   ])("recognizes recall intent in %j", (message) => {
     expect(hasRecallIntent(message)).toBe(true);
   });
@@ -157,6 +160,12 @@ describe("active-memory escalation", () => {
     "Rappelle-moi dans une heure de rappeler Ting",
     "Qu'est-ce qu'on mange ce soir ?",
     "Hier il a plu toute la journée",
+    "Tu te souviens d'envoyer le rapport ?",
+    "Tu te souviens d'envoyer le rapport aujourd'hui ?",
+    "Vous vous rappelez de faire les courses ?",
+    "Hier j'ai payé à crédit.",
+    "Hier on a fait un audit.",
+    "J'ai dit que mon cahier était plein.",
   ])("does not mistake ordinary or future-facing %j for recall intent", (message) => {
     expect(hasRecallIntent(message)).toBe(false);
   });
