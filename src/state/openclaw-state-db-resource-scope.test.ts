@@ -161,21 +161,33 @@ it("keeps accepted resource work independent of a transferred resource claim whi
   expect(isSqliteWorkerMaintenanceAuthorityCurrent(accepted!)).toBe(false);
 });
 
-it("reopens the same scope authority after cleanup failure without reviving a closed scope", async () => {
+it("reopens a failed cleanup without reviving its frame during the next attempt", async () => {
   const scope = createOpenClawDatabaseMaintenanceScope();
   const failure = new Error("cleanup failed");
   let fail = true;
+  const retryDone = createDeferredCore();
+  const cleanupFrames: NonNullable<ReturnType<typeof captureSqliteWorkerMaintenanceAuthority>>[] =
+    [];
   scope.own({}, "shared-handles", () => {
+    cleanupFrames.push(captureSqliteWorkerMaintenanceAuthority(scope)!);
     if (fail) {
       throw failure;
     }
+    return retryDone.promise;
   });
   const captured = captureSqliteWorkerMaintenanceAuthority(scope)!;
   await expect(scope.close()).rejects.toThrow(failure);
   expect(isSqliteWorkerMaintenanceAuthorityCurrent(captured)).toBe(true);
   expect(() => scope.run(() => {})).not.toThrow();
   fail = false;
-  await scope.close();
+  const retry = scope.close();
+  try {
+    expect(isSqliteWorkerMaintenanceAuthorityCurrent(cleanupFrames[0])).toBe(false);
+    expect(isSqliteWorkerMaintenanceAuthorityCurrent(cleanupFrames[1])).toBe(true);
+  } finally {
+    retryDone.resolve();
+    await retry;
+  }
   expect(isSqliteWorkerMaintenanceAuthorityCurrent(captured)).toBe(false);
   expect(() => scope.run(() => {})).toThrow("resource scope is closed");
 });

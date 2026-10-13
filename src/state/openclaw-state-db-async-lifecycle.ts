@@ -210,8 +210,9 @@ export function createOpenClawDatabaseMaintenanceScope(
       const completion = createDeferredCore();
       lifetime.drain();
       closing = completion.promise;
+      const cleanupLifetime = new MaintenanceContinuationLifetime();
       void maintenanceResources.current
-        .run({ scope, lifetime: new MaintenanceContinuationLifetime() }, async () => {
+        .run({ scope, lifetime: cleanupLifetime }, async () => {
           let beforeSharedResources = beforeResources;
           while (pending.size || resources.size || beforeSharedResources) {
             while (pending.size) {
@@ -264,9 +265,11 @@ export function createOpenClawDatabaseMaintenanceScope(
             }
           }
           schemaMigrationChecks.clear();
+          cleanupLifetime.retire();
           lifetime.close();
         })
         .then(completion.resolve, (error: unknown) => {
+          cleanupLifetime.retire();
           lifetime.reopen();
           closing = undefined;
           completion.reject(error);
