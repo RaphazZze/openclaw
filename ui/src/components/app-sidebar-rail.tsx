@@ -13,7 +13,10 @@ import {
   type SidebarZoneEntry,
 } from "../app-navigation.ts";
 import { isMobileNavLayout } from "../app/mobile-nav-layout.ts";
-import { beginNativeWindowDragFromTopInset } from "../app/native-window-drag.ts";
+import {
+  beginNativeWindowDrag,
+  beginNativeWindowDragFromTopInset,
+} from "../app/native-window-drag.ts";
 import {
   formatKeyboardShortcutCombo,
   KEYBOARD_SHORTCUT_COMBOS,
@@ -33,6 +36,7 @@ import type { SidebarRecentSession } from "./app-sidebar-session-types.ts";
 import { personActivityLink, personActivityRouting } from "./person-activity-link.ts";
 import { SessionIconGraphic } from "./session-icon-glyph-solid.tsx";
 import { restoreSnapshotSession } from "./sidebar-snapshot-model.ts";
+import "./sidebar-collapse-toggle.tsx";
 import { Icon } from "./solid/icon.tsx";
 import { renderNewSessionLink } from "./solid/new-session-link.tsx";
 import {
@@ -482,7 +486,10 @@ export function renderSidebarPages(host: AppSidebarRenderHost): JSX.Element {
       onDragOver={(event) => host.sessionOrganizer.handleSessionListDragOver(event)}
       onDrop={(event) => host.sessionOrganizer.handleSessionListDrop(event)}
     >
-      <div class="sidebar-pages__heading">{t("nav.pages")}</div>
+      <div class="sidebar-pages__heading sidebar-panel-header" onMouseDown={beginNativeWindowDrag}>
+        <span>{t("nav.pages")}</span>
+        <openclaw-sidebar-collapse-toggle prop:onToggle={() => host.onToggleSidebar?.()} />
+      </div>
       <openclaw-mcp-app-catalog surface="sidebar" />
       <For each={entries()} keyed={serializeSidebarEntry}>
         {(entry) => {

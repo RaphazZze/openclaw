@@ -3,6 +3,7 @@ import { Dynamic } from "@solidjs/web";
 import { createMemo, For } from "solid-js";
 import { presenceUserKey } from "../../../src/shared/presence-user.ts";
 import type { ApplicationGateway } from "../app/gateway.ts";
+import { beginNativeWindowDrag } from "../app/native-window-drag.ts";
 import {
   presenceViewerActivity,
   presenceActivityLabel,
@@ -12,10 +13,10 @@ import {
 import { t } from "../lib/reactive/i18n.ts";
 import { renderHoverMarquee } from "../lib/solid/hover-marquee.tsx";
 import type { AppSidebarRenderHost } from "./app-sidebar-render.tsx";
-import { renderSidebarSessionSectionHeader } from "./app-sidebar-session-section-header.tsx";
 import { personActivityLink, personActivityRouting } from "./person-activity-link.ts";
 import { sidebarOnlineCountFor, SidebarOnlineOrder } from "./sidebar-online-order.ts";
 import { Icon } from "./solid/icon.tsx";
+import "./sidebar-collapse-toggle.tsx";
 
 const onlineOrders = new WeakMap<
   HTMLElement,
@@ -82,70 +83,54 @@ export function renderAppSidebarOnline(host: AppSidebarRenderHost): JSX.Element 
   );
   return (
     <section class="sidebar-online" aria-label={label()} data-session-section={sectionId}>
-      {renderSidebarSessionSectionHeader({
-        get sectionId() {
-          return sectionId;
-        },
-        draggable: false,
-        onStartDrag: () => undefined,
-        onFinishDrag: () => undefined,
-        get content() {
-          return (
-            <>
-              <button
-                type="button"
-                class="sidebar-session-group-toggle"
-                aria-expanded={!collapsed() ? "true" : "false"}
-                aria-label={label()}
-                onClick={() => {
-                  if (team()) {
-                    host.teamOnlineExpanded = collapsed();
-                  } else {
-                    host.toggleSection(sectionId);
-                  }
-                }}
-              >
-                <span class="sidebar-session-group-toggle__lead" aria-hidden="true">
-                  <span class="sidebar-session-group-toggle__icon">
-                    {collapsed() ? <Icon name="chevronRight" /> : <Icon name="chevronDown" />}
-                  </span>
-                </span>
-                {renderHoverMarquee(label(), "sidebar-recent-sessions__label-text")}
-                {collapsed() ? (
-                  <span class="sidebar-online__facepile">
-                    <openclaw-viewer-facepile
-                      prop:staticUsers={onlineUsers()}
-                      prop:maxVisible={2}
-                    />
-                  </span>
-                ) : undefined}
-              </button>
-              {collapsed() ? undefined : (
-                <button
-                  type="button"
-                  class={[
-                    "sidebar-session-toolbar__button sidebar-online__filter-toggle sidebar-session-sort",
-                    { "sidebar-session-sort--filtered": filtered() },
-                  ]}
-                  aria-label={t("presence.filters.label")}
-                  title={t("presence.filters.label")}
-                  aria-haspopup="dialog"
-                  aria-expanded={
-                    host.sidebarMenus.peopleFilterMenuPosition !== null ? "true" : "false"
-                  }
-                  onClick={(event: MouseEvent) => {
-                    if (event.currentTarget instanceof HTMLElement) {
-                      host.sidebarMenus.togglePositionedMenu("peopleFilter", event.currentTarget);
-                    }
-                  }}
-                >
-                  <Icon name="listFilter" />
-                </button>
-              )}
-            </>
-          );
-        },
-      })}
+      <div class="sidebar-panel-header" onMouseDown={beginNativeWindowDrag}>
+        <button
+          type="button"
+          class="sidebar-session-group-toggle"
+          aria-expanded={!collapsed() ? "true" : "false"}
+          aria-label={label()}
+          onClick={() => {
+            if (team()) {
+              host.teamOnlineExpanded = collapsed();
+            } else {
+              host.toggleSection(sectionId);
+            }
+          }}
+        >
+          <span class="sidebar-session-group-toggle__lead" aria-hidden="true">
+            <span class="sidebar-session-group-toggle__icon">
+              {collapsed() ? <Icon name="chevronRight" /> : <Icon name="chevronDown" />}
+            </span>
+          </span>
+          {renderHoverMarquee(label(), "sidebar-recent-sessions__label-text")}
+          {collapsed() ? (
+            <span class="sidebar-online__facepile">
+              <openclaw-viewer-facepile prop:staticUsers={onlineUsers()} prop:maxVisible={2} />
+            </span>
+          ) : undefined}
+        </button>
+        {collapsed() ? undefined : (
+          <button
+            type="button"
+            class={[
+              "sidebar-session-toolbar__button sidebar-online__filter-toggle sidebar-session-sort",
+              { "sidebar-session-sort--filtered": filtered() },
+            ]}
+            aria-label={t("presence.filters.label")}
+            title={t("presence.filters.label")}
+            aria-haspopup="dialog"
+            aria-expanded={host.sidebarMenus.peopleFilterMenuPosition !== null ? "true" : "false"}
+            onClick={(event: MouseEvent) => {
+              if (event.currentTarget instanceof HTMLElement) {
+                host.sidebarMenus.togglePositionedMenu("peopleFilter", event.currentTarget);
+              }
+            }}
+          >
+            <Icon name="listFilter" />
+          </button>
+        )}
+        <openclaw-sidebar-collapse-toggle prop:onToggle={() => host.onToggleSidebar?.()} />
+      </div>
       {collapsed() ? undefined : (
         <>
           <div class="sidebar-online__list">

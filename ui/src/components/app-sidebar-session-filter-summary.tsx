@@ -1,9 +1,11 @@
 import { createMemo, Show, untrack } from "solid-js";
 import { gatewayPresentationScope } from "../app/gateway-presentation-scope.ts";
 import { isMobileNavLayout } from "../app/mobile-nav-layout.ts";
+import { beginNativeWindowDrag } from "../app/native-window-drag.ts";
 import { sessionParticipantIdentityKey } from "../lib/chat/sender-label.ts";
 import { getLocale, t } from "../lib/reactive/i18n.ts";
 import type { SessionListHost } from "./app-sidebar-session-render-types.ts";
+import "./sidebar-collapse-toggle.tsx";
 import { renderSessionOwnerAvatar } from "./session-owner-chip.ts";
 import { Icon } from "./solid/icon.tsx";
 import { Picker } from "./solid/select-picker.tsx";
@@ -136,11 +138,12 @@ function renderSidebarSessionFilter(
     </button>
   );
 }
-export function renderSessionListToolbar(host: SessionListHost) {
+export function renderSessionListToolbar(host: SessionListHost & { onToggleSidebar?: () => void }) {
   return (
-    <div class="sidebar-session-toolbar">
+    <div class="sidebar-session-toolbar sidebar-panel-header" onMouseDown={beginNativeWindowDrag}>
       <SidebarOwnerPicker host={host} />
       {renderSidebarSessionFilter(host, "sidebar-session-toolbar__button")}
+      <openclaw-sidebar-collapse-toggle prop:onToggle={() => host.onToggleSidebar?.()} />
     </div>
   );
 }
