@@ -32,6 +32,7 @@ export function GitHubPublicationMenu(props: {
         value.owner.addEventListener(PRESENTATION_CHANGED_EVENT, sync);
         return () => value.owner.removeEventListener(PRESENTATION_CHANGED_EVENT, sync);
       }
+      return undefined;
     },
   );
   const items = createMemo(() =>
