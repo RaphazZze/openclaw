@@ -337,6 +337,7 @@ it.each([
         target: { ...f.scope, expectedSessionId: f.scope.sessionId, sessionEntry: f.read() },
         updateMode: "none",
       });
+      await input.actor.read({ assertCurrent, authorize: assertCurrent });
       bindUserTurnInputActor(recorder, { phase, acquire: async () => input });
       let metadataWrites = 0;
       const afterCompetingWrite = async <T>(submit: () => Promise<T>) => {

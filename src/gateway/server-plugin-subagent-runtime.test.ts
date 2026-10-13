@@ -38,7 +38,6 @@ import {
   createGatewaySubagentRuntime,
   resolvePluginSubagentOverridePolicies,
 } from "./server-plugin-subagent-runtime.js";
-
 const isolated = vi.hoisted(() => vi.fn<typeof runIsolatedCompletion>());
 const normalizeProviderModelIdWithRuntime = vi.hoisted(() =>
   vi.fn<(params: { provider: string; context: { modelId: string } }) => string | undefined>(
@@ -49,13 +48,11 @@ vi.mock("../agents/isolated-completion.js", () => ({ runIsolatedCompletion: isol
 vi.mock("../agents/provider-model-normalization.runtime.js", () => ({
   normalizeProviderModelIdWithRuntime,
 }));
-
 const PLUGIN_ID = "test-completion";
 type CompleteParams = Parameters<PluginRuntime["subagent"]["complete"]>[0];
 let config: OpenClawConfig;
 let context: GatewayRequestContext | undefined;
 let lifetime: AbortController;
-
 function createRuntime() {
   return createGatewaySubagentRuntime(
     () => context,
@@ -63,13 +60,11 @@ function createRuntime() {
     lifetime.signal,
   );
 }
-
 function complete(runtime: PluginRuntime["subagent"], params: Partial<CompleteParams> = {}) {
   return withPluginRuntimePluginScope({ pluginId: PLUGIN_ID }, () =>
     runtime.complete({ agentId: "research", message: "Review these notes", ...params }),
   );
 }
-
 function completeScoped(
   client: GatewayRequestOptions["client"],
   params: Partial<CompleteParams> = {},
@@ -80,14 +75,12 @@ function completeScoped(
     () => runtime.complete({ agentId: "research", message: "Review these notes", ...params }),
   );
 }
-
 const operatorProfile = {
   profileId: "completion-operator",
   displayName: "Completion operator",
   hasAvatar: false,
   updatedAt: 1,
 };
-
 function restrictOperatorAgents() {
   config.gateway = {
     roles: {
@@ -98,7 +91,6 @@ function restrictOperatorAgents() {
     },
   };
 }
-
 function blockSubagentSlots(count: number) {
   const gate = createDeferred();
   const work = Array.from({ length: count }, () =>
