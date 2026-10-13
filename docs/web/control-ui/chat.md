@@ -12,6 +12,10 @@ sidebarTitle: "Chat"
 
 How the chat pane behaves: the session rail, the composer, and how the transcript renders.
 
+When the latest history page has no visible messages, for example because tool
+activity is hidden, the pane loads earlier history automatically. An incomplete
+history page does not show the new-chat welcome screen.
+
 Enable **Settings → Labs → Speech bubbles** to try the experimental view (off by default).
 While enabled, Home uses bubbles by default. The session menu’s **View → Speech bubbles**
 option changes only that conversation. Explicit choices stay in this browser for this
@@ -810,8 +814,17 @@ HTML widget media keep their existing behavior.
 
 ## Session Details
 
-Select **Details** at the top-right of the conversation to open the session’s compact information surface.
-It opens only on request, not when progress or background activity updates.
+**Details** brings session context and task progress together beside the conversation.
+On wide chat panes it opens automatically as a docked right-hand column, with
+the transcript and composer centered in the remaining space. Docking uses the
+space left after navigation, split panes, and other panels—not the window width
+alone. The column scrolls independently and never covers the conversation.
+
+When the pane becomes too narrow, automatically opened Details collapses. Select
+**Details** to open it as an overlay on narrower screens. Closing it explicitly
+keeps it closed while that conversation remains open, including through progress
+updates, resizing, and temporarily hiding its pane. Selecting **Details** reopens it.
+
 **Session details** and **Task progress** have independent disclosure states.
 Session context groups workspace information, pull requests, people, subagents,
 and attached automations; it reuses their existing actions rather than duplicating
@@ -847,8 +860,8 @@ Task progress cards are enabled by default. Toggle **Show task progress cards** 
 Hiding it does not stop agent work or clear saved progress.
 
 Opening Details does not couple the two sections’ disclosure states. Sending
-messages, run completion, and progress updates do not automatically open Details
-or reopen a card the user collapsed. See
+messages, run completion, and progress updates do not reopen Details after it is
+explicitly closed or reopen a card the user collapsed. See
 [Task progress cards](/tools/progress-card#where-the-card-appears) for card-lifetime
 and preference behavior.
 

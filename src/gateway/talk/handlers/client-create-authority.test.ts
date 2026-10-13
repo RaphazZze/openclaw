@@ -654,7 +654,7 @@ describe("voice creation authority", () => {
               path: sourcePath,
             });
             if (database) {
-              closeCachedOpenClawAgentDatabase(database, { eviction: true });
+              closeCachedOpenClawAgentDatabase(database);
             }
           }
           creatingVoice = true;
