@@ -640,7 +640,7 @@ it.each([1, 128])(
     const store = await open(databasePath());
     const thread = (await append(store, "retained")).threadId;
     const held = createDeferredCore();
-    let worker: Worker | undefined;
+    let authority: SqliteWorkerMaintenanceAuthority | undefined;
     let release: (() => void) | undefined;
     const messages = vi.spyOn(Worker.prototype, "emit");
     messages.mockImplementation(function (
@@ -649,8 +649,17 @@ it.each([1, 128])(
       ...args: unknown[]
     ) {
       if (event === "message" && this.threadId === thread) {
-        worker = this;
         messages.mockRestore();
+        const postMessage = this.postMessage.bind(this);
+        vi.spyOn(this, "postMessage").mockImplementation(
+          (message: SqliteWorkerRequest, ...postArgs) => {
+            if (message.type === "execute" && message.maintenanceAuthority) {
+              authority = message.maintenanceAuthority;
+              expect(isSqliteWorkerMaintenanceAuthorityCurrent(authority)).toBe(true);
+            }
+            return postMessage(message, ...postArgs);
+          },
+        );
         release = () => EventEmitter.prototype.emit.call(this, event, ...args);
         held.resolve();
         return true;
@@ -660,20 +669,8 @@ it.each([1, 128])(
     const predecessors = Promise.all(Array.from({ length: count }, () => read(store)));
     const maintenance = createOpenClawDatabaseMaintenanceScope();
     let closing: Promise<void> | undefined;
-    let authority: SqliteWorkerMaintenanceAuthority | undefined;
     try {
       await held.promise;
-      assert(worker, "queued read must retain its worker");
-      const postMessage = worker.postMessage.bind(worker);
-      vi.spyOn(worker, "postMessage").mockImplementation(
-        (message: SqliteWorkerRequest, ...args) => {
-          if (message.type === "execute" && message.maintenanceAuthority) {
-            authority = message.maintenanceAuthority;
-            expect(isSqliteWorkerMaintenanceAuthorityCurrent(authority)).toBe(true);
-          }
-          return postMessage(message, ...args);
-        },
-      );
       const accepted = maintenance.run(async () => read(store));
       const outcome = expect(accepted).resolves.toEqual(["retained"]);
       closing = maintenance.close();
