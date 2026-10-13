@@ -2217,6 +2217,7 @@
   "ui/src/pages/new-session/draft-session-startup.ts",
   "ui/src/pages/new-session/draft-submission-flow.ts",
   "ui/src/pages/new-session/draft-submission-input.ts",
+  "ui/src/pages/new-session/draft-suggested-cloud-profile.ts",
   "ui/src/pages/new-session/draft-terminal-host-state.ts",
   "ui/src/pages/new-session/draft-title.ts",
   "ui/src/pages/new-session/folder-validation.ts",
