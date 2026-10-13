@@ -108,13 +108,15 @@ export async function repairLaunchAgentBootstrap(args: {
   const warn = args.warn ?? ((message: string) => console.warn(formatLine("Warning", message)));
   await rewriteLaunchAgentPlistForRestart({ env, label, plistPath, warn });
   try {
-    await bootstrapLaunchAgentOrThrow({
+    const bootstrap = await bootstrapLaunchAgentOrThrow({
       domain,
       serviceTarget,
       plistPath,
       actionHint: "openclaw gateway start",
     });
-    return { ok: true, status: "repaired" };
+    if (bootstrap === "bootstrapped") {
+      return { ok: true, status: "repaired" };
+    }
   } catch (error) {
     if (hasCommandProcessCleanupError(error)) {
       throw error;
