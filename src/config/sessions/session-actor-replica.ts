@@ -397,8 +397,8 @@ function readCurrentEntryCell(target: FileTarget, admitted?: DatabasePathIdentit
   }
   if (token) {
     touch(cell);
-    return { cell, state, incarnation: cell.generation };
   }
+  return token ? { cell, state, incarnation: cell.generation } : undefined;
 }
 
 /** Entry projections share actor residency; they never certify live authority. */
