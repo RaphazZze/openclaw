@@ -473,10 +473,10 @@ export function inspectDatabaseWorkerBoundaries(
         node,
       };
       registered.set(symbol, operation);
-      const object = ts.isMethodDeclaration(node)
-        ? node.parent
-        : ts.isArrowFunction(node) && ts.isPropertyAssignment(node.parent)
-          ? node.parent.parent
+      const object = ts.isMethodDeclaration(operation.node)
+        ? operation.node.parent
+        : ts.isArrowFunction(operation.node) && ts.isPropertyAssignment(operation.node.parent)
+          ? operation.node.parent.parent
           : undefined;
       if (member && object && ts.isObjectLiteralExpression(object)) {
         // Explicit receiver types create distinct symbols at each instantiation.
@@ -485,7 +485,10 @@ export function inspectDatabaseWorkerBoundaries(
         if (contract) {
           forwarded.set(contract, symbol);
           for (const declaration of contract.declarations) {
-            contractDeclarations.set(declaration.resolve(), operation);
+            const resolved = declaration.resolve();
+            if (resolved) {
+              contractDeclarations.set(resolved, operation);
+            }
           }
         }
       }
@@ -747,7 +750,10 @@ export function inspectDatabaseWorkerBoundaries(
     const direct =
       registered.get(symbol) ??
       symbol.declarations
-        .map((contract) => contractDeclarations.get(contract.resolve()))
+        .map((contract) => {
+          const resolved = contract.resolve();
+          return resolved ? contractDeclarations.get(resolved) : undefined;
+        })
         .find((operation) => operation !== undefined) ??
       (declaration
         ? declarations.get(
