@@ -614,7 +614,7 @@ describe.skipIf(skipBroker)("auth SQLite broker lifecycle", () => {
   it.each([false, true])(
     "retains a failed read until lost-broker cleanup settles (cleanup failure: %s)",
     async (cleanupFails) => {
-      const { source } = createAuthDatabase();
+      const { source, rows } = createAuthDatabase();
       const broker = createSpawnBrokerHost();
       const admitted = createDeferredCore<BrokerChild>();
       const ready = createDeferredCore();
@@ -672,11 +672,14 @@ describe.skipIf(skipBroker)("auth SQLite broker lifecycle", () => {
           expect.anything(),
         );
         if (cleanupFails) {
+          cleanupSpy.mockRestore();
+          ready.resolve();
+          await broker.ready();
           const launches = spawning.mock.calls.length;
-          await expect(runWithSpawnBroker(broker, () => read(source, "canonical"))).rejects.toBe(
-            cleanupFailure,
-          );
-          expect(spawning).toHaveBeenCalledTimes(launches);
+          await expect(
+            runWithSpawnBroker(broker, () => read(source, "canonical")),
+          ).resolves.toEqual(rows);
+          expect(spawning).toHaveBeenCalledTimes(launches + 1);
         }
         cleanupSpy.mockRestore();
       } finally {

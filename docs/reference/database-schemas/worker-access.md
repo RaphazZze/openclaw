@@ -62,6 +62,9 @@ releases its native readers before its reply. Idle processes retire after one
 minute, and failed or cancelled processes retire before another request reuses
 that slot. Runtimes without qualified native SQLite close still require process
 retirement before releasing snapshot custody.
+Unconfirmed native cleanup quarantines its slot without releasing that custody.
+Reads use remaining healthy capacity; four quarantined slots reject visibly
+instead of launching another process or waiting indefinitely.
 
 Paced page-cache warming leases one of those same slots until its caller scope
 closes. Its iterator stays in one exclusive child across `begin` and `step`

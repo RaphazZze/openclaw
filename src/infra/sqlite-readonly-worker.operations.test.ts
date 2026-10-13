@@ -6,15 +6,19 @@ import { DatabaseSync, StatementSync } from "node:sqlite";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { deserialize } from "node:v8";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, expect, it, vi, type MockInstance } from "vitest";
 import { awaitGateBeforeSettlement, withinTest } from "../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { createCurrentOpenClawAgentDatabaseFixtures } from "../state/openclaw-agent-db.test-support.js";
+import * as sqliteRuntime from "./bun-sqlite-library.js";
 import { onInternalDiagnosticEvent, waitForDiagnosticEventsDrained } from "./diagnostic-events.js";
 import type { DiagnosticWorkerRequestFields } from "./diagnostic-process-types.js";
 import { cleanupSnapshotOperations } from "./sqlite-readonly-location-cleanup.js";
+import { createSqliteReadOnlyWorkerPool } from "./sqlite-readonly-worker-session.js";
 import {
+  captureSqliteReadOnlyWorkerLaunch,
+  createScopedSqliteReadOnlyWorker,
   createSqliteReadOnlyWorkerScope,
   runSqliteReadOnlyOperation,
 } from "./sqlite-readonly-worker.js";
@@ -426,6 +430,125 @@ it("bounds concurrent incompatible launches to four live reader processes", asyn
     vi.mocked(spawn).mockImplementation(actual.spawn);
   }
 });
+
+it("quarantines failed cleanup without poisoning healthy capacity or launching a fifth child", async () => {
+  await cleanupSnapshotOperations();
+  const qualified = sqliteRuntime.getSqliteRuntimeCapabilities();
+  const unqualified = { ...qualified, explicitSqliteCloseReleasesNativeResources: false };
+  const capabilities = vi.spyOn(sqliteRuntime, "getSqliteRuntimeCapabilities").mockReturnValue({
+    ...unqualified,
+  });
+  const sessions: Array<ReturnType<typeof createScopedSqliteReadOnlyWorker>> = [];
+  const closeMocks: Array<MockInstance<() => Promise<void>>> = [];
+  const failure = new Error("fixture native cleanup is unconfirmed");
+  const readPool = createSqliteReadOnlyWorkerPool((launch) => {
+    const session = createScopedSqliteReadOnlyWorker(launch);
+    sessions.push(session);
+    closeMocks.push(vi.spyOn(session, "close").mockRejectedValue(failure));
+    return session;
+  });
+  const launch = captureSqliteReadOnlyWorkerLaunch(env, "canonical");
+  const start = vi.mocked(spawn).mock.calls.length;
+  const readSmall = () =>
+    readPool(
+      source,
+      {
+        mode: "operation",
+        source: "canonical",
+        expectedIdentity,
+        env,
+        command: { type: "pluginCatalog.read", input: { agentId: "main", pluginIds: ["small"] } },
+      },
+      launch,
+    );
+  try {
+    for (let index = 0; index < 4; index++) {
+      await expect(readSmall()).rejects.toThrow("SQLite read and child cleanup failed");
+      expect(vi.mocked(spawn).mock.calls.length - start).toBe(index + 1);
+      expect(closeMocks[index]).toHaveBeenCalledTimes(2);
+      if (index < 3) {
+        capabilities.mockReturnValue(qualified);
+        await expect(readSmall()).resolves.toEqual({
+          operation: "pluginCatalog.read",
+          value: [{ pluginId: "small", contents: "small catalog" }],
+        });
+        capabilities.mockReturnValue(unqualified);
+      }
+    }
+    await expect(readSmall()).rejects.toThrow("capacity is held by unconfirmed cleanup");
+    expect(vi.mocked(spawn).mock.calls.length - start).toBe(4);
+    for (const close of closeMocks) {
+      expect(close).toHaveBeenCalledTimes(2);
+    }
+  } finally {
+    capabilities.mockRestore();
+    for (const close of closeMocks) {
+      close.mockRestore();
+    }
+    await Promise.all(sessions.map((session) => session.close()));
+  }
+});
+
+it.skipIf(process.platform !== "linux")(
+  "wakes capacity waiters when leased native cleanup fails",
+  async () => {
+    const sessions: Array<ReturnType<typeof createScopedSqliteReadOnlyWorker>> = [];
+    const closeMocks: Array<MockInstance<() => Promise<void>>> = [];
+    const failure = new Error("fixture leased cleanup is unconfirmed");
+    const readPool = createSqliteReadOnlyWorkerPool((launch) => {
+      const session = createScopedSqliteReadOnlyWorker(launch);
+      sessions.push(session);
+      closeMocks.push(vi.spyOn(session, "close").mockRejectedValue(failure));
+      return session;
+    });
+    const launch = captureSqliteReadOnlyWorkerLaunch(env, "canonical");
+    const warmers = Array.from({ length: 4 }, () => createSqliteReadOnlyWorkerScope());
+    const start = vi.mocked(spawn).mock.calls.length;
+    try {
+      for (const request of warmers) {
+        await request.run(() =>
+          readPool(
+            source,
+            {
+              mode: "operation",
+              source: "canonical",
+              expectedIdentity,
+              env,
+              command: {
+                type: "pageCache.begin",
+                input: { kind: "agent", maxBytes: 1024, now: Date.now() },
+              },
+            },
+            launch,
+          ),
+        );
+      }
+      const waiting = readPool(
+        source,
+        {
+          mode: "operation",
+          source: "canonical",
+          expectedIdentity,
+          env,
+          command: { type: "pluginCatalog.read", input: { agentId: "main", pluginIds: ["small"] } },
+        },
+        launch,
+      );
+      const rejected = expect(waiting).rejects.toThrow("capacity is held by unconfirmed cleanup");
+      for (const request of warmers) {
+        await expect(request.close()).rejects.toThrow("scope cleanup failed");
+      }
+      await rejected;
+      expect(vi.mocked(spawn).mock.calls.length - start).toBe(4);
+    } finally {
+      for (const close of closeMocks) {
+        close.mockRestore();
+      }
+      await Promise.all(sessions.map((session) => session.close()));
+      await Promise.allSettled(warmers.map((request) => request.close()));
+    }
+  },
+);
 
 it.skipIf(process.platform !== "linux")(
   "keeps paced page-cache passes isolated from other scopes and launch eviction",
