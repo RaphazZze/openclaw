@@ -455,9 +455,12 @@ Retained WAL bytes still count toward the physical budget. Successful cleanup
 logs one outcome with the before/after bytes and removal counts.
 Archive pruning measures physical usage outside the foreground writer queue.
 Each deletion and page-reclamation unit retains its own admission, with a yield
-between reclamation units. Concurrent shrinkage can prune one additional oldest
-derived archive before the next measurement ends the sweep; canonical retention
-and deletion eligibility checks are unchanged.
+between reclamation units. Archive retention also selects candidates outside the
+writer queue, then rechecks and removes at most 16 rows per admission, yielding
+between batches while retaining the same 256-row selection limit per pass.
+Concurrent shrinkage can prune one additional oldest derived archive before the
+next measurement ends the sweep; canonical retention and deletion eligibility
+checks are unchanged.
 
 An incomplete SQLite WAL checkpoint is a separate deferral. Cleanup preserves
 archives and history instead of deleting more data behind the blocked checkpoint.
