@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { trackSqliteStatementExecutions } from "../../test/helpers/sqlite-statement-execution-counter.js";
+import { revokeSqliteDatabaseAdmissionsForPath } from "../infra/sqlite-database-admission.js";
 import {
   getAdmittedSqliteSchemaFacts,
   runSqliteReadOperationSync,
@@ -563,6 +564,7 @@ describe("canonical proof on physical database validation", () => {
           const received = independentWorkerReceipt(database);
           closeOpenClawAgentDatabaseByPath(database.path);
           clearOpenClawAgentDatabaseValidationCache(database.path);
+          revokeSqliteDatabaseAdmissionsForPath(database.path);
           const reader = openOpenClawAgentDatabaseReadOnly(options);
           if (!reader.found || !received.schema) {
             throw new Error("Expected a canonical reader and an independently admitted receipt");
@@ -883,6 +885,9 @@ describe("canonical proof on physical database validation", () => {
           state === "empty" || state === "durable handoff",
         );
         if (state === "durable handoff") {
+          expect(getOpenClawAgentDatabaseValidationForTransfer(database)).toBeUndefined();
+          invalidateOpenClawAgentCanonicalValidation(database);
+          expect(getOpenClawAgentDatabaseValidation(database)).toBeUndefined();
           expect(getOpenClawAgentDatabaseValidationForTransfer(database)).toBeUndefined();
         }
       });

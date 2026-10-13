@@ -415,6 +415,7 @@ export async function createCatalogFixture(
       },
     },
   } satisfies OpenClawConfig;
+  await seedFixturePluginModelCatalog(agentDir, env, PLUGIN_ID, PROVIDER_ID);
   replaceRuntimeAuthProfileStoreSnapshots([
     {
       agentDir,
@@ -447,7 +448,6 @@ export async function createCatalogFixture(
         syncExternalCli: false,
       })
     : undefined;
-  await seedFixturePluginModelCatalog(agentDir, env, PLUGIN_ID, PROVIDER_ID);
   return { agentDir, config, env, marker, externalAuthPath, hydratedAuthStore, root, workspaceDir };
 }
 
@@ -602,6 +602,7 @@ export async function expectNativeHarnessModelsPublishedFromWorker(params: {
     [REF_ONLY_API_ENV]: "ref-only-api-secret-not-real",
     [REF_ONLY_TOKEN_ENV]: "ref-only-token-secret-not-real",
   };
+  await seedFixturePluginModelCatalog(agentDir, env, PLUGIN_ID, PROVIDER_ID);
   replaceRuntimeAuthProfileStoreSnapshots([
     {
       agentDir,
@@ -619,7 +620,6 @@ export async function expectNativeHarnessModelsPublishedFromWorker(params: {
       },
     },
   ]);
-  await seedFixturePluginModelCatalog(agentDir, env, PLUGIN_ID, PROVIDER_ID);
   const input = {
     agentId: "main",
     agentDir,

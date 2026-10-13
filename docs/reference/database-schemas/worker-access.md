@@ -68,6 +68,18 @@ Replacement files also require new admission; migration and repair owners publis
 replacement facts after committed DDL. Doctor and explicit verification retain
 their checks. See [integrity admission](/reference/database-schemas/integrity-and-recovery).
 
+Retained task workers request admission facts through their existing relay when
+needed. Task messages must not copy the global admission snapshot. Committed
+session deletion retires its exact receipt scopes, including windows removed by
+cascade, while windows transferred to a surviving session retain their scopes.
+Shared retirement flags remove those scopes and exited workers' reference cells
+from later admission snapshots; stale transfers cannot restore them. Recreated
+scope keys receive a fresh receipt identity, so old cached reads remain invalid.
+Receipt metadata follows retained session scopes rather than all deleted sessions;
+reads of absent keys can still register a scope. Replacement files still require
+admission through the same owner. Schemas, stored data, and update behavior are
+unchanged.
+
 For row data, hydrate once and update or invalidate the owner's in-memory facts
 from committed write receipts. Every writer must participate. A receipt may
 supply a postimage or explicit absence; missing coverage is unknown, not absence.
@@ -134,6 +146,14 @@ outcomes return reads to the canonical worker. Bounded transcript payload reads
 remain with the history owner. See
 [`session-actor.worker.ts`](https://github.com/openclaw/openclaw/blob/main/src/config/sessions/session-actor.worker.ts)
 and [`session-actor-replica.ts`](https://github.com/openclaw/openclaw/blob/main/src/config/sessions/session-actor-replica.ts).
+
+Cold input preparation uses the turn planner instead of fetching a full actor
+replica first. The planner carries its recovery expectation into the input
+command; prepared, explicit, and warm replica expectations remain fixed across
+version retries. Transcript input and restart recovery still
+commit atomically under the existing writer FIFO, source checks, final host
+COMMIT authorization, and receipt settlement. Schemas, durability, and update
+behavior are unchanged.
 
 Session memory indexing is background work. It batches transcript changes after
 an idle gap, pauses while the agent is busy, and yields between bounded source
@@ -387,7 +407,12 @@ visibility, membership, and conversation authority that the destination worker
 cannot validate. These changes add no schema, retention, or update migration.
 
 Cold session creation uses the existing session-entry worker for requested-key
-and parent lookups. Personal default selection reads profile links and its selected
+and parent lookups. The Gateway's `snapshot` timing includes scope preparation and
+its writer-queue reservation before the worker read; it does not clone the session
+store. That reservation preserves earlier queued writes when adopting an existing
+key and protects shared-store discovery from concurrent cold registration. Creation
+commits acquire their own writer admission and revalidate current authority.
+Personal default selection reads profile links and its selected
 credential through the existing shared-state and auth-store readers; credential
 authority still applies at the creation effect. Default cron loads resolve their
 saved partition in the same worker operation that loads the jobs. A queued load
@@ -4151,10 +4176,13 @@ admission can refuse dispatch or close can clean up the original handle. Host
 admission and physical-identity checks remain on the host.
 Checkpoint-only PASSIVE ticks preserve the connection's busy timeout without
 reading or changing it: SQLite does not invoke the busy handler for PASSIVE.
-After a complete tick, the WAL owner skips subsequent checkpoint-only work until
-an in-process write receipt changes. Sibling handles and workers share that receipt;
-blocked or failed checkpoints keep retrying when a reader may have released.
-Connections without a known write receipt continue checkpointing on every tick.
+After a complete tick, the WAL owner disarms its checkpoint-only timer until a
+local in-process write receipt schedules the next pass within ten seconds. Local
+sibling handles share the notification, and each native writer worker schedules
+its own maintenance. Later writes do not postpone a pending pass. Blocked or failed
+checkpoints keep retrying when a reader may have released. Connections without a
+known write receipt and explicit blocking checkpoint policies retain their timed
+cadence. Close removes the write notification along with the timer.
 Page reclamation and blocking checkpoint modes keep their zero-timeout scope.
 
 Completed checkpoint-only passes publish their write revision through the existing
@@ -6367,6 +6395,12 @@ The manager adopts that receipt before publishing pending-tool changes. Each
 event still commits before the runtime advances; bulk transcript imports reuse
 their transaction-local append cursor. Root checks read metadata without saved
 prompt payloads. No cross-transaction root cache is introduced.
+
+Transcript rewrite preparation and publication copy mutable view containers while
+retaining already-owned string values, so old tool results and image payloads do
+not require another full byte copy on the main thread. Prepared views remain
+independently mutable. Opaque structured-cloneable SDK data retains native snapshot
+semantics. Worker write ordering, atomic publication, and stored bytes are unchanged.
 
 Append receipts read active identity, projection readiness, and the latest sequence
 in one transaction-local query. A clean latest message shares that result with

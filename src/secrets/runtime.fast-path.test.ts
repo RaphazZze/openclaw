@@ -98,7 +98,6 @@ describe("secrets runtime fast path", () => {
     clearRuntimeConfigSnapshot();
     clearConfigCache();
     closeOpenClawAgentDatabasesForTest();
-    vi.resetModules();
   });
 
   it("uses the fast path when web fetch only configures runtime limits", async () => {
@@ -268,7 +267,7 @@ describe("secrets runtime fast path", () => {
     }
   });
 
-  it("refreshes startup-only fast-path snapshots from persisted auth stores after startup", async () => {
+  it("publishes owner writes after a startup-only fast path and preserves them on refresh", async () => {
     const { ensureAuthProfileStoreWithoutExternalProfiles } =
       await import("../agents/auth-profiles/store-runtime.js");
     const { prepareSecretsRuntimeFastPathSnapshot } = await import("./runtime-fast-path.js");
@@ -306,7 +305,7 @@ describe("secrets runtime fast path", () => {
 
       expect(
         ensureAuthProfileStoreWithoutExternalProfiles(agentDir).profiles["openai:default"],
-      ).toBeUndefined();
+      ).toMatchObject({ type: "api_key", provider: "openai", key: "sk-test" });
 
       await expect(refreshActiveProviderAuthRuntimeSnapshot()).resolves.toBe(true);
       const active = getActiveSecretsRuntimeSnapshotState();

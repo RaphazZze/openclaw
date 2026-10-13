@@ -537,11 +537,12 @@ export function refreshPreparedModelRuntimeSnapshots(
   const initialAgentIds =
     typeof config === "function" ? undefined : resolveSafeRefreshAgentIds(config, options, owners);
   const forceFullRefresh = requestedScopedRefresh && initialAgentIds === undefined;
-  // Stale synchronously. Queued publication must never leave the prior generation request-visible.
+  // Admit replacement and Gateway lifetime synchronously before this task can be superseded.
   markPreparedModelRuntimeSnapshotsStale(undefined, {
     waitForReplacement: true,
     agentIds: initialAgentIds,
   });
+  gatewayLifecycleActive ||= options.gatewayLifecycle === true;
   const requestEpoch = refreshRequestEpoch;
   const acquisitionSignal = refreshCancellation.signal;
   const replacement = pendingModelRuntimeReplacement;
@@ -620,7 +621,6 @@ export function refreshPreparedModelRuntimeSnapshots(
         ? undefined
         : resolveSafeRefreshAgentIds(currentConfig, options, owners);
       retainedGatewayRunOwners.clear(owners);
-      gatewayLifecycleActive ||= options.gatewayLifecycle === true;
       await configuredRefresh.refreshPreparedModelRuntimeSnapshotsNow(
         currentConfig,
         { ...options, agentIds: publicationAgentIds },

@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import type { SqliteDatabaseAdmissionKey } from "../infra/sqlite-database-admission.js";
+import {
+  readSqliteDatabaseIntegrityVerification,
+  type SqliteDatabaseAdmissionKey,
+} from "../infra/sqlite-database-admission.js";
 import type { SqliteSchemaFacts } from "../infra/sqlite-schema-facts.js";
 import { readOpenClawAgentDatabaseIdentity } from "./openclaw-agent-db-identity.js";
 
@@ -11,6 +14,8 @@ export type OpenClawAgentDatabaseValidation = {
   birthtime: string;
   /** Shared-buffer wrappers change across worker transfers; this identifies the proof instance. */
   receiptId: string;
+  /** Preserve the full-check age when a worker borrows proof after host eviction. */
+  integrityVerifiedAt?: number;
   /** Shared with admitted workers so owner invalidation revokes borrowed proof. */
   valid: SharedArrayBuffer;
   /** First full canonical proof; subsequent changes remain visible through the pending table. */
@@ -41,6 +46,7 @@ export function createOpenClawAgentDatabaseValidationReceipt(
     identity,
     birthtime,
     receiptId: randomUUID(),
+    integrityVerifiedAt: readSqliteDatabaseIntegrityVerification(database.db)?.verifiedAt,
     valid: new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT),
     canonicalReady: new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT),
   };

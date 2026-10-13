@@ -39,7 +39,7 @@ import {
   type RuntimeConfigWriteApplicationStatus,
 } from "../config/runtime-write-application.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { loadCronJobsStore, resolveCronJobsStorePathFromConfigAsync } from "../cron/store.js";
+import { resolveCronJobsStorePathFromConfigAsync } from "../cron/store.js";
 import {
   consumeGatewayRestartIntent,
   isGatewayRestartExternallyAllowed,
@@ -130,7 +130,6 @@ import {
   createTestConfigRevisionProjector,
   createConfigWriteListenerRef,
   createManagedReloadAuthFixture,
-  createMonitorPublicationFailure,
   createManagedRestartSequenceConfigs,
   createConfigWriteNotification,
   createRecordedChannelHandlers,
@@ -146,6 +145,7 @@ import {
   makePluginReloadResult,
   publishConfigWrite,
 } from "./server-reload-handlers.config.test-support.js";
+import { registerGatewayCronReloadTests } from "./server-reload-handlers.cron.test-support.js";
 import {
   createSupervisedExitWatcherFixture,
   fixtureLifetime,
@@ -2028,140 +2028,7 @@ describe("gateway hot reload model state", () => {
     },
   );
 
-  it.each(["rejected", "noop"] as const)(
-    "keeps partial monitor writes aligned with accepted config through a %s successor",
-    async (successor) => {
-      const clock = createGatewaySchedulerClock(Date.now());
-      const scheduler = createTestGatewayScheduler(clock.clock);
-      const fixtureDir = autoCleanupTempDirs.make("openclaw-monitor-publication-");
-      const initialConfig: OpenClawConfig = {
-        agents: {
-          entries: {
-            first: { heartbeat: { every: "1h" } },
-            second: { heartbeat: { every: "1h" } },
-          },
-        },
-      };
-      const nextConfig = {
-        ...initialConfig,
-        agents: {
-          entries: {
-            first: { heartbeat: { every: "2h" } },
-            second: { heartbeat: { every: "2h" } },
-          },
-        },
-      } satisfies OpenClawConfig;
-      activateSecretsRuntimeSnapshot(makePreparedSecretsSnapshot(initialConfig));
-      const { buildGatewayCronService } =
-        await vi.importActual<typeof import("./server-cron.js")>("./server-cron.js");
-      const cronState = buildGatewayCronService({
-        storePath: await resolveCronJobsStorePathFromConfigAsync(initialConfig, {
-          ...process.env,
-          OPENCLAW_STATE_DIR: fixtureDir,
-        }),
-        scheduler,
-        cfg: initialConfig,
-        deps: {} as never,
-        env: { ...process.env, OPENCLAW_STATE_DIR: fixtureDir, OPENCLAW_SKIP_CRON: "0" },
-        broadcast: vi.fn(),
-      });
-      cronState.cron.pauseScheduling();
-      const publicationFailure = createMonitorPublicationFailure();
-      let state = createDefaultGatewayReloadState({ cronState });
-      const requestRecoveryRestart = vi.fn(() => ({ status: "emitted" as const }));
-      const handlers = createGatewayReloadHandlers({
-        getState: () => state,
-        setState: (nextState) => {
-          state = nextState;
-        },
-        requestRecoveryRestart,
-      });
-      const markRuntimeCommitted = vi.fn();
-      const ownership: Parameters<typeof managed.onHotReload>[2] = {
-        isCurrent: () => true,
-        checkpoint: async () => {},
-        withRestartPreparation: async (run) => await run(ownership),
-        markRuntimeCommitted,
-        publishRuntimeEnv: vi.fn(),
-        commitRuntimeEnv: vi.fn(),
-        rollbackRuntimeEnv: vi.fn(),
-        reapplyRuntimeOverlays: (config: OpenClawConfig) => config,
-      };
-      const managed = createManagedReloadSecretHandlers({
-        params: {
-          activateRuntimeSecrets: createMockRuntimeSecretsActivator(),
-          clients: [],
-          sharedGatewaySessionGenerationState: new SharedGatewaySessionGenerationState({
-            current: undefined,
-            required: null,
-          }),
-          resolveSharedGatewaySessionGenerationForConfig: () => undefined,
-          commitRuntimePolicy: vi.fn(),
-          reconcileRuntimePolicy: vi.fn(),
-        },
-        prepareRuntimeCandidate: (config) => config,
-        tryPrepareRuntimeSecrets: async (config) => ({
-          snapshot: makePreparedSecretsSnapshot(config),
-          expectedRevision: getActiveSecretsRuntimeSnapshotRevision(),
-        }),
-        applyHotReload: handlers.applyHotReload,
-        hasPendingModelRuntimeReload: handlers.hasPendingModelRuntimeReload,
-      });
-      const readIntervals = async () =>
-        (await loadCronJobsStore(cronState.storePath)).jobs
-          .filter((job) => job.payload.kind === "heartbeat")
-          .toSorted((left, right) => (left.agentId ?? "").localeCompare(right.agentId ?? ""))
-          .map((job) => (job.schedule.kind === "every" ? job.schedule.everyMs : undefined));
-      try {
-        await expect(cronState.reconcileSystemJobs()).resolves.toBe("converged");
-        publicationFailure.install();
-        const result = await managed
-          .onHotReload(
-            buildGatewayReloadPlan(["agents.entries.first.heartbeat.every"]),
-            nextConfig,
-            ownership,
-            nextConfig,
-          )
-          .catch((error: unknown) => error);
-        expect(await readIntervals()).toEqual([7_200_000, 3_600_000]);
-        expect(result).toBe("applied");
-        expect(requestRecoveryRestart).not.toHaveBeenCalled();
-        expect(markRuntimeCommitted).toHaveBeenCalledOnce();
-        expect(getActiveSecretsRuntimeSnapshot()?.config).toEqual(nextConfig);
-        publicationFailure.remove();
-        const successorConfig = { ...nextConfig, logging: { level: "debug" as const } };
-        if (successor === "rejected") {
-          await expect(
-            managed.onHotReload(
-              buildGatewayReloadPlan(["logging.level"]),
-              successorConfig,
-              { ...ownership, isCurrent: () => false },
-              successorConfig,
-            ),
-          ).rejects.toThrow("superseded");
-        } else {
-          await expect(
-            managed.onHotReload(
-              buildGatewayReloadPlan([]),
-              successorConfig,
-              ownership,
-              successorConfig,
-            ),
-          ).resolves.toBe("applied");
-        }
-        await clock.advanceBy(30_000);
-        expect(await readIntervals()).toEqual([7_200_000, 7_200_000]);
-      } finally {
-        try {
-          publicationFailure.dispose();
-        } finally {
-          handlers.stopRestartRetries();
-          cronState.cron.stop();
-          await scheduler.stop();
-        }
-      }
-    },
-  );
+  registerGatewayCronReloadTests({ createGatewayReloadHandlers, autoCleanupTempDirs });
 
   it("rejects an ownerless heartbeat update failure before runtime commit", async () => {
     const publish = vi.fn(async (commit: () => Promise<void>) => await commit());

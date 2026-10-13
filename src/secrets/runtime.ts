@@ -10,6 +10,7 @@ import {
   getRuntimeAuthProfileStoreCredentialsRevision,
   getRuntimeAuthProfileStoreSnapshotsRevision,
   prepareRuntimeAuthProfileStoreSnapshots,
+  registerRuntimeAuthProfileExternalRefresh,
 } from "../agents/auth-profiles/runtime-snapshots.js";
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
 import {
@@ -49,6 +50,7 @@ import {
   getActiveSecretsRuntimeRefreshContext,
   getActiveSecretsRuntimeSnapshotState,
   getActiveSecretsRuntimeSnapshotRevisionState,
+  hasActiveSecretsRuntimeAuthStorePath,
   graftActiveSecretsRuntimeAuthState,
   getPreparedSecretsRuntimeSnapshotRefreshContext,
   prepareSecretsRuntimeDisplaySnapshot,
@@ -661,6 +663,13 @@ export async function refreshActiveProviderAuthRuntimeSnapshot(): Promise<boolea
     }
   }
 }
+
+registerRuntimeAuthProfileExternalRefresh(async (paths) => {
+  if (!paths.some(hasActiveSecretsRuntimeAuthStorePath)) {
+    return false;
+  }
+  return refreshActiveProviderAuthRuntimeSnapshot();
+});
 
 export {
   getActiveSecretsRuntimeSnapshotState as getActiveSecretsRuntimeSnapshot,

@@ -8,6 +8,8 @@ import {
 const loaders = {
   machineState: () =>
     import("./config-machine-state.read.worker.js").then((m) => m.machineStateReadOperations),
+  projects: () =>
+    import("../projects/project-registry.kernel.js").then((m) => m.projectRegistryReadOperations),
   agentDeletion: () =>
     import("../agents/agent-delete-session-store-safety.kernel.js").then(
       (m) => m.agentDeletionSessionStoreReadOperations,

@@ -7,6 +7,8 @@ import { isPathInside } from "../infra/path-guards.js";
 import {
   getSqliteDatabaseAdmission,
   publishSqliteDatabaseAdmission,
+  readSqliteDatabaseIntegrityVerification,
+  recordSqliteDatabaseIntegrity,
 } from "../infra/sqlite-database-admission.js";
 import { stageSqliteTransactionState } from "../infra/sqlite-post-commit.js";
 import {
@@ -213,6 +215,17 @@ export function adoptOpenClawAgentDatabaseSchema(
   }
   if (adopted) {
     adoptCanonicalSessionValidationSchema(database.db);
+    if (validation?.integrityVerifiedAt !== undefined) {
+      if (readSqliteDatabaseIntegrityVerification(database.db) === undefined) {
+        recordSqliteDatabaseIntegrity(database.db, validation.integrityVerifiedAt);
+      }
+      if (
+        getSqliteDatabaseAdmission(database.db, agentDatabaseValidationKey)?.receiptId !==
+        validation.receiptId
+      ) {
+        publishSqliteDatabaseAdmission(database.db, agentDatabaseValidationKey, validation);
+      }
+    }
   }
   return adopted;
 }
@@ -287,9 +300,8 @@ export function getOpenClawAgentDatabaseValidation(
   ) {
     return undefined;
   }
-  const validation = entry.validation;
-  bindValidationLifetime(database, validation);
-  return validation;
+  bindValidationLifetime(database, entry.validation);
+  return entry.validation;
 }
 
 /** The receiving opener must adopt this proof against its own physical file identity. */
@@ -598,6 +610,11 @@ export function invalidateOpenClawAgentCanonicalValidation(
   const validation = canonicalValidationReceipt(database);
   if (validation) {
     Atomics.store(new Int32Array(validation.canonicalReady), 0, 0);
+    // A seal can restore a separate copy of this receipt after the last handle closes.
+    const pathname = findOpenClawAgentDatabaseIdentity(database)?.canonicalPath;
+    if (pathname && validatedPaths.get(pathname)?.integrityVerified) {
+      publishSqliteDatabaseAdmission(database.db, agentDatabaseValidationKey, validation);
+    }
   }
   clearPersistedOpenClawAgentCanonicalValidation(database);
 }
@@ -689,6 +706,9 @@ export function setOpenClawAgentDatabaseValidation(
   ) {
     // Successful admission promotes this owner; only revocation retires pending handoffs.
     if (entry.validation) {
+      if (validation.integrityVerifiedAt !== undefined) {
+        entry.validation.integrityVerifiedAt = validation.integrityVerifiedAt;
+      }
       Atomics.store(
         new Int32Array(entry.validation.canonicalReady),
         0,
