@@ -136,6 +136,11 @@ extension GatewayProcessManager {
                 }
             case .versionUpdated:
                 self.nodeMigrationVersionUpdated = true
+            case .newerRuntimePreserved:
+                // The runtime obligation is satisfied by the healthy newer Node service.
+                // Retain its CLI for Resume; no Bun installation or garbage collection occurred.
+                self.nodeMigrationVersionUpdated = false
+                self.nodeMigrationCompleted = true
             case .migrated:
                 self.nodeMigrationVersionUpdated = false
                 self.nodeMigrationCompleted = true

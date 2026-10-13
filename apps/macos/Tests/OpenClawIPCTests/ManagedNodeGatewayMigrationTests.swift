@@ -53,6 +53,7 @@ struct ManagedNodeGatewayMigrationTests {
                         self.packageDirectory = updatedPackageDirectory
                     }
                 },
+                resumeNode: { _ in self.calls.append("resume-node") },
                 recapture: { _, _ in self.calls.append("capture")
                     return self.candidate
                 },
@@ -76,6 +77,25 @@ struct ManagedNodeGatewayMigrationTests {
                     }
                 })
         }
+    }
+
+    @Test(arguments: [false, true])
+    func `newer Node runtime stays healthy without installing the older app bundle`(serviceExists: Bool) async throws {
+        let fixture = Fixture()
+        fixture.version = "2026.10.2"
+        fixture.serviceExists = serviceExists
+        let candidate = fixture.candidate
+        let outcome = try await ManagedNodeGatewayMigration.run(
+            candidate: candidate, targetVersion: "2026.10.1", operations: fixture.operations)
+        guard case .newerRuntimePreserved = outcome else {
+            Issue.record("Expected the newer Node runtime to be preserved")
+            return
+        }
+        #expect(fixture.calls == (serviceExists
+                ? ["capture", "service", "health"]
+                : ["capture", "service", "resume-node", "health"]))
+        #expect(fixture.version == "2026.10.2")
+        #expect(fixture.hostedCLI == candidate.cli)
     }
 
     @Test func `version changes stay in core updater without starting the runtime switch`() async throws {
