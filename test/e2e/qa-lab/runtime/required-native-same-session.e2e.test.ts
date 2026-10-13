@@ -386,14 +386,10 @@ it.skipIf(process.platform === "win32")(
             .then((result) => {
               record("agent.wait-terminal", { runId, ...result });
               if (result.status !== "ok") {
-                console.info(
-                  "required-native-dispatch-error",
-                  gateway
-                    .logs()
-                    .split("\n")
-                    .filter((line) => /workspace|skills|not allowed|POLICY_DENIED/i.test(line))
-                    .join("\n"),
-                );
+                record("required-native-dispatch-error", {
+                  runId,
+                  gatewayLog: gateway.logs().slice(-24_000),
+                });
                 observationFailure.reject(new Error("agent.wait: " + JSON.stringify(result)));
               }
               return result;
