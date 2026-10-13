@@ -8,6 +8,7 @@ export type SqliteReadOnlyWorkerScope = {
   pending: Set<Promise<unknown>>;
   deadlineOwnedByCaller: boolean;
   worker?: ReturnType<typeof createSqliteReadOnlyWorkerSession>;
+  releaseReadWorker?: () => Promise<void>;
 };
 export const readOnlyWorkerScope = new AsyncLocalStorage<SqliteReadOnlyWorkerScope>();
 

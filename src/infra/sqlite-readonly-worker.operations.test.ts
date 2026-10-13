@@ -361,7 +361,16 @@ it("closes a queued scope without waiting for an unrelated active transfer", asy
     awaitGateBeforeSettlement(paused.promise, active, "Active read did not reach transfer"),
     signal,
   );
-  const queued = secondScope.run(() => runSqliteReadOnlyOperation(source, command, options));
+  const queued = secondScope.run(() =>
+    runSqliteReadOnlyOperation(
+      source,
+      {
+        type: "pageCache.begin",
+        input: { kind: "agent", maxBytes: 1024, now: Date.now() },
+      },
+      options,
+    ),
+  );
   const rejected = expect(queued).rejects.toThrow("scope closed");
   let closed = false;
   const closing = secondScope.close().then(() => {
@@ -417,3 +426,111 @@ it("bounds concurrent incompatible launches to four live reader processes", asyn
     vi.mocked(spawn).mockImplementation(actual.spawn);
   }
 });
+
+it.skipIf(process.platform !== "linux")(
+  "keeps paced page-cache passes isolated from other scopes and launch eviction",
+  async () => {
+    await cleanupSnapshotOperations();
+    const first = createSqliteReadOnlyWorkerScope();
+    const second = createSqliteReadOnlyWorkerScope();
+    const begin = (request: typeof first) =>
+      request.run(() =>
+        runSqliteReadOnlyOperation(
+          source,
+          { type: "pageCache.begin", input: { kind: "agent", maxBytes: 1024, now: Date.now() } },
+          { source: "canonical", expectedIdentity, env },
+        ),
+      );
+    try {
+      expect((await begin(first)).complete).toBe(false);
+      const firstChild: ChildProcess = vi.mocked(spawn).mock.results.at(-1)?.value;
+      expect((await begin(second)).complete).toBe(false);
+      const secondChild: ChildProcess = vi.mocked(spawn).mock.results.at(-1)?.value;
+      expect(secondChild).not.toBe(firstChild);
+      for (let index = 0; index < 5; index++) {
+        await runSqliteReadOnlyOperation(
+          source,
+          { type: "pluginCatalog.read", input: { agentId: "main", pluginIds: ["small"] } },
+          {
+            source: "canonical",
+            expectedIdentity,
+            env: { ...env, OPENCLAW_POOL_FIXTURE: `paced-${index}` },
+          },
+        );
+      }
+      const progress = await first.run(() =>
+        runSqliteReadOnlyOperation(
+          source,
+          { type: "pageCache.step", input: null },
+          {
+            source: "canonical",
+            expectedIdentity,
+            env,
+          },
+        ),
+      );
+      expect(typeof progress.complete).toBe("boolean");
+      expect(firstChild.exitCode).toBeNull();
+      await second.close();
+      expect(secondChild.connected).toBe(false);
+      expect(secondChild.exitCode !== null || secondChild.signalCode !== null).toBe(true);
+      expect(firstChild.exitCode).toBeNull();
+      await first.close();
+      expect(firstChild.connected).toBe(false);
+      expect(firstChild.exitCode !== null || firstChild.signalCode !== null).toBe(true);
+    } finally {
+      await Promise.all([first.close(), second.close()]);
+    }
+  },
+);
+
+it.skipIf(process.platform !== "linux")(
+  "waits for leased capacity and cancels a waiting scope without disturbing warm passes",
+  async ({ signal }) => {
+    await cleanupSnapshotOperations();
+    const warmers = Array.from({ length: 4 }, () => createSqliteReadOnlyWorkerScope());
+    const waiting = createSqliteReadOnlyWorkerScope();
+    const aborting = createSqliteReadOnlyWorkerScope();
+    const start = vi.mocked(spawn).mock.calls.length;
+    try {
+      await Promise.all(
+        warmers.map((request) =>
+          request.run(() =>
+            runSqliteReadOnlyOperation(
+              source,
+              {
+                type: "pageCache.begin",
+                input: { kind: "agent", maxBytes: 1024, now: Date.now() },
+              },
+              { source: "canonical", expectedIdentity, env },
+            ),
+          ),
+        ),
+      );
+      const readSmall = () =>
+        runSqliteReadOnlyOperation(
+          source,
+          { type: "pluginCatalog.read", input: { agentId: "main", pluginIds: ["small"] } },
+          { source: "canonical", expectedIdentity, env },
+        );
+      let settled = false;
+      const queued = waiting.run(readSmall).then((rows) => {
+        settled = true;
+        return rows;
+      });
+      const cancelled = aborting.run(readSmall);
+      const rejected = expect(cancelled).rejects.toThrow("scope closed");
+      await aborting.close();
+      await rejected;
+      await nextTurn();
+      expect(settled).toBe(false);
+      expect(vi.mocked(spawn).mock.calls.length - start).toBe(4);
+      await warmers[0]!.close();
+      await expect(withinTest(queued, signal)).resolves.toEqual([
+        { pluginId: "small", contents: "small catalog" },
+      ]);
+    } finally {
+      await Promise.all([...warmers, waiting, aborting].map((request) => request.close()));
+    }
+  },
+);

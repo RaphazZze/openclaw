@@ -63,6 +63,13 @@ minute, and failed or cancelled processes retire before another request reuses
 that slot. Runtimes without qualified native SQLite close still require process
 retirement before releasing snapshot custody.
 
+Paced page-cache warming leases one of those same slots until its caller scope
+closes. Its iterator stays in one exclusive child across `begin` and `step`
+requests; other reads cannot interleave or evict it. Closing the scope joins child
+retirement even when warming is abandoned between steps. A cancelled reservation
+that never entered the child releases promptly without retiring another caller's
+active read. When all slots are leased, new requests wait with cancellation.
+
 Read requests launch through the Gateway's spawn broker when available. Broker
 nonadmission fails the request rather than spawning a native replacement on the
 Gateway thread. CLI contexts without a broker use the same bounded pool with

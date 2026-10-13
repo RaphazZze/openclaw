@@ -10,8 +10,6 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getSpawnBroker } from "../process/spawn-broker/context.js";
 import { runInDetachedAsyncContext } from "../shared/detached-async-context.js";
 import { isArtifactPreservingStateRead } from "../state/artifact-preserving-state-reads.js";
-import { racePromiseWithAbortSignal } from "./abort-signal.js";
-import { getSqliteRuntimeCapabilities } from "./bun-sqlite-library.js";
 import { hasErrnoCode } from "./errno.js";
 import { resolveNodeCompileCacheEnv } from "./node-compile-cache-env.js";
 import { SQLITE_READONLY_CHILD_ARG } from "./runtime-process-entrypoints.js";
@@ -19,7 +17,6 @@ import { resolveRuntimeProcessEntrypointUrl } from "./runtime-process-url.js";
 import { captureRuntimeWorkerSource } from "./runtime-worker-generation.js";
 import { resolveRuntimeWorkerArgv } from "./runtime-worker-url.js";
 import { tryProcessCwd } from "./safe-cwd.js";
-import { createSqliteLifecycleAggregateError } from "./sqlite-lifecycle-errors.js";
 import { retainSnapshotWork } from "./sqlite-readonly-location-cleanup.js";
 import type { SqliteReadOnlyOperations } from "./sqlite-readonly-operation-registry.js";
 import {
@@ -39,10 +36,9 @@ import {
 } from "./sqlite-readonly-worker-protocol.js";
 import {
   createSqliteReadOnlyWorkerSession,
-  isSameSqliteReadOnlyWorkerLaunch,
+  createSqliteReadOnlyWorkerPool,
   type SqliteReadOnlyWorkerLaunch,
 } from "./sqlite-readonly-worker-session.js";
-import { classifyWorkerRequest, trackWorkerRequest } from "./worker-request-diagnostics.js";
 
 const SLOW_HARDWARE_HEADROOM = 10;
 const SQLITE_INSPECTION_TIMEOUT_MS = 30_000 * SLOW_HARDWARE_HEADROOM;
@@ -161,7 +157,10 @@ export function createSqliteReadOnlyWorkerScope(options?: {
         scope.active = false;
         scope.controller.abort(new Error("SQLite read-only worker scope closed"));
         await Promise.allSettled(scope.pending);
-        const closed = await Promise.allSettled([scope.worker?.close()]);
+        const closed = await Promise.allSettled([
+          scope.worker?.close(),
+          scope.releaseReadWorker?.(),
+        ]);
         const failures = closed.flatMap((result) =>
           result.status === "rejected" ? [result.reason] : [],
         );
@@ -410,125 +409,7 @@ export function runSqliteReadOnlyWorker(
   });
 }
 
-function trackSqliteRead(options: SqliteAuthProfileReadOptions | SqliteReadOnlyOperationOptions) {
-  return trackWorkerRequest(
-    "sqlite_read",
-    classifyWorkerRequest(options.mode === "operation" ? options.command.type : options.mode),
-    options.signal,
-  );
-}
-
-// Process reuse is bounded independently of request scopes. Each slot serializes
-// its requests; cancellation retires only the active child, never another slot.
-const scopedReadWorkers: Array<{
-  launch: SqliteReadOnlyWorkerLaunch;
-  session?: ReturnType<typeof createSqliteReadOnlyWorkerSession>;
-  tail: Promise<void>;
-  queued: number;
-  idle?: ReturnType<typeof setTimeout>;
-}> = [];
-const SCOPED_READ_WORKER_LIMIT = 4;
-const SCOPED_READ_WORKER_IDLE_MS = 60_000;
-
-function armScopedReadWorkerIdle(slot: (typeof scopedReadWorkers)[number]) {
-  slot.idle = runInDetachedAsyncContext(() =>
-    setTimeout(() => {
-      const worker = slot.session;
-      // Leave the retiring session in the slot until its native close has joined.
-      slot.tail = runInDetachedAsyncContext(() =>
-        (worker?.close() ?? Promise.resolve()).then(
-          () => {
-            if (slot.session === worker) {
-              slot.session = undefined;
-            }
-          },
-          () => {
-            log.warn("Idle SQLite read-only worker cleanup failed");
-          },
-        ),
-      );
-    }, SCOPED_READ_WORKER_IDLE_MS),
-  );
-  slot.idle.unref();
-}
-
-function runSqliteScopedReadWorker(
-  pathname: string,
-  options: SqliteAuthProfileReadOptions | SqliteReadOnlyOperationOptions,
-  launch: SqliteReadOnlyWorkerLaunch,
-  observation = trackSqliteRead(options),
-): Promise<SqliteReadOnlyWorkerValue> {
-  let slot = scopedReadWorkers.find((candidate) =>
-    isSameSqliteReadOnlyWorkerLaunch(candidate.launch, launch),
-  );
-  if (!slot && scopedReadWorkers.length < SCOPED_READ_WORKER_LIMIT) {
-    slot = { launch, tail: Promise.resolve(), queued: 0 };
-    scopedReadWorkers.push(slot);
-  }
-  slot ??= scopedReadWorkers.find((candidate) => candidate.queued === 0 && !candidate.session);
-  slot ??= scopedReadWorkers.reduce((best, candidate) =>
-    candidate.queued < best.queued ? candidate : best,
-  );
-  const selected = slot;
-  clearTimeout(selected.idle);
-  selected.queued++;
-  const previous = selected.tail;
-  const operation = runInDetachedAsyncContext(() =>
-    racePromiseWithAbortSignal(previous, options.signal, (signal) => signal.reason),
-  )
-    .then(async () => {
-      options.signal?.throwIfAborted();
-      observation.started();
-      if (
-        !isSameSqliteReadOnlyWorkerLaunch(selected.launch, launch) ||
-        selected.session?.isRetired()
-      ) {
-        await selected.session?.close();
-        selected.session = undefined;
-      }
-      options.signal?.throwIfAborted();
-      selected.launch = launch;
-      const worker = (selected.session ??= createScopedSqliteReadOnlyWorker({
-        ...launch,
-        pooledRead: true,
-      }));
-      worker.setIdle(false);
-      try {
-        const value = await worker.run(pathname, options);
-        options.signal?.throwIfAborted();
-        if (!getSqliteRuntimeCapabilities().explicitSqliteCloseReleasesNativeResources) {
-          await worker.close();
-          selected.session = undefined;
-        }
-        return value;
-      } catch (error) {
-        // Confirm native retirement before releasing a failed request's bytes.
-        try {
-          await worker.close();
-          selected.session = undefined;
-        } catch (cleanupError) {
-          throw createSqliteLifecycleAggregateError(
-            [error, cleanupError],
-            "SQLite read and child cleanup failed",
-            error,
-          );
-        }
-        throw error;
-      }
-    })
-    .finally(() => {
-      observation.completed();
-      selected.queued--;
-      if (selected.queued === 0 && selected.session && !selected.session.isRetired()) {
-        selected.session?.setIdle(true);
-        armScopedReadWorkerIdle(selected);
-      }
-    });
-  selected.tail = runInDetachedAsyncContext(() =>
-    Promise.allSettled([previous, operation]).then(() => {}),
-  );
-  return operation;
-}
+const runSqliteScopedReadWorker = createSqliteReadOnlyWorkerPool(createScopedSqliteReadOnlyWorker);
 
 export function runSqliteReadOnlyWorkerOnce(
   pathname: string,
