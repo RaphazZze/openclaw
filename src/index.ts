@@ -138,7 +138,10 @@ const compileCacheRespawnEnv =
   shouldRunCli &&
   !isForegroundGmailRunArgv(process.argv) &&
   !shouldKeepNativeHookRelayInProcess(process.argv, process.platform)
-    ? resolveOpenClawCompileCacheRespawnEnv({ directory: compileCacheDirectory })
+    ? resolveOpenClawCompileCacheRespawnEnv({
+        directory: compileCacheDirectory,
+        foregroundGateway: isForegroundGatewayRunArgv(process.argv),
+      })
     : undefined;
 if (compileCacheRespawnEnv) {
   const args = [...process.execArgv, fileURLToPath(import.meta.url), ...process.argv.slice(2)];
@@ -150,7 +153,10 @@ if (compileCacheRespawnEnv) {
   await runRespawnedChild(process.execPath, args, compileCacheRespawnEnv);
 }
 if (shouldRunCli && !compileCacheRespawnEnv) {
-  enableOpenClawCompileCache({ directory: compileCacheDirectory });
+  enableOpenClawCompileCache({
+    directory: compileCacheDirectory,
+    foregroundGateway: isForegroundGatewayRunArgv(process.argv),
+  });
   const [
     { formatCliFailureLines, formatCliJsonFailure, isExpectedCliError },
     { isJsonOutputModeActive },
