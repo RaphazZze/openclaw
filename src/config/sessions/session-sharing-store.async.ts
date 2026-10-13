@@ -29,7 +29,7 @@ import {
 import { retainSessionEntryWorkerPublication } from "./session-accessor.sqlite-entry-worker-publication.js";
 import type { recordSessionParticipant } from "./session-accessor.sqlite-participants.native.js";
 import { prepareSessionEntryReplacementDatabase } from "./session-accessor.sqlite-replacement-worker.js";
-import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
+import { prepareSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
 import type { SessionActorMemoryCollaborationCommand } from "./session-actor-memory-collaboration-contract.js";
 import {
   captureSessionActorStorageOwner,
@@ -126,10 +126,10 @@ export async function runSessionCollaborationWrite<
     }
     return result.value;
   }
-  const resolved = resolveSqliteScope(scope);
-  const resolvedOptions = toDatabaseOptions(resolved);
-  const env = cloneEnvWithPlatformSemantics(resolved.env ?? process.env);
+  const env = cloneEnvWithPlatformSemantics(scope.env ?? process.env);
   env.OPENCLAW_STATE_DIR = resolveStateDir(env);
+  const resolved = await prepareSqliteScope({ ...scope, env });
+  const resolvedOptions = toDatabaseOptions(resolved);
   const options = {
     ...resolvedOptions,
     env,
@@ -381,20 +381,22 @@ export async function runSessionCollaborationWrite<
 }
 
 /** The receipt owner installs retained facts before releasing pending publication. */
-export function publishSessionCollaborationChange(
-  change: SessionRowChange,
+export function publishSessionCollaborationChanges(
+  changes: readonly SessionRowChange[],
   databaseIdentity?: string,
 ): void {
   if (databaseIdentity) {
-    const facts = "facts" in change ? change.facts : undefined;
-    bindPreparedSessionEntryPublication(change, {
-      kind: "marker",
-      sharingChange:
-        facts?.kind === "participants" || facts?.kind === "unchanged" ? "unchanged" : "changed",
-      databaseIdentity,
-    });
+    for (const change of changes) {
+      const facts = "facts" in change ? change.facts : undefined;
+      bindPreparedSessionEntryPublication(change, {
+        kind: "marker",
+        sharingChange:
+          facts?.kind === "participants" || facts?.kind === "unchanged" ? "unchanged" : "changed",
+        databaseIdentity,
+      });
+    }
   }
-  sessionChanges.emit(change);
+  sessionChanges.emitBatch(changes);
 }
 
 function publishSessionMembership(
@@ -402,8 +404,8 @@ function publishSessionMembership(
   location: { agentId: string; storePath: string; sessionKey: string },
   databaseIdentity: string | undefined,
 ) {
-  publishSessionCollaborationChange(
-    facts ? { ...location, facts } : { ...location, factsInvalidated: true },
+  publishSessionCollaborationChanges(
+    [facts ? { ...location, facts } : { ...location, factsInvalidated: true }],
     databaseIdentity,
   );
 }
@@ -492,7 +494,7 @@ export function recordSessionParticipantInWorker(
             : { kind: "participants", projectionChanged: false },
         };
         // Count-only writes still invalidate exact aggregate records in the actor replica.
-        publishSessionCollaborationChange(change, database);
+        publishSessionCollaborationChanges([change], database);
         emitSessionLifecycleEvent({
           agentId: location.agentId,
           sessionKey: location.sessionKey,
