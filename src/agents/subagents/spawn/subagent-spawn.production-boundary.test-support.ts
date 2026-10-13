@@ -5,7 +5,7 @@ import { expect, it, vi, type Mock } from "vitest";
 import { createDeferred, withinTest } from "../../../../test/helpers/promise.js";
 import { captureRuntimeConfigAsyncReader } from "../../../config/config.js";
 import {
-  appendTranscriptEvent,
+  appendTranscriptMessage,
   loadSessionEntry,
   loadTranscriptEvents,
   upsertSessionEntryCore,
@@ -309,17 +309,10 @@ type GatewayRuntime = ReturnType<typeof createGatewayInstanceRuntime>;
 
 export async function prepareIsolatedChildAdmissionProof(bound: BoundParent) {
   const { parentSessionKey, storePath } = bound;
-  expect(
-    await appendTranscriptEvent(
-      { storePath, sessionKey: parentSessionKey, sessionId: "parent-session" },
-      {
-        type: "message",
-        id: "parent-only-message",
-        parentId: null,
-        message: { role: "user", content: "History belonging only to the parent" },
-      },
-    ),
-  ).toBe(true);
+  await appendTranscriptMessage(
+    { storePath, sessionKey: parentSessionKey, sessionId: "parent-session" },
+    { message: { role: "user", content: "History belonging only to the parent" } },
+  );
   let createdChild: ReturnType<typeof loadSessionEntry>;
   spawnTesting.setDepsForTest({
     dispatchGatewayMethodInProcess: async <T>(

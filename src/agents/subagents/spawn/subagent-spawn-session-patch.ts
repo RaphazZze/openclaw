@@ -371,7 +371,8 @@ export async function createInitialSubagentSession(input: {
               ? {
                   freshChild: {
                     agentId: target.agentId,
-                    storePath: target.readSource?.path ?? target.storePath,
+                    // Lifecycle admission uses the store selector, not the physical database path.
+                    storePath: target.storePath,
                     entry,
                   },
                 }
