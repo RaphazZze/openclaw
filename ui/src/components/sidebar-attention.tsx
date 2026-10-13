@@ -239,7 +239,6 @@ function renderSidebarAttentionContent(props: SidebarAttentionProps, host: HTMLE
       }
     },
   );
-  preloadPanel();
   document.addEventListener("pointerdown", handleOutsideInteraction, true);
   document.addEventListener("keydown", handleOutsideInteraction, true);
   window.addEventListener("blur", handleWindowBlur);
