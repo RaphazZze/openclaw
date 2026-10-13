@@ -141,13 +141,7 @@ async function readPendingInputRows(
     return { rows: [], total: 0 };
   }
   assertReadCurrent();
-  if (
-    hasSessionActorEmptyPendingInputHistory(
-      identity.canonicalPath,
-      resolved.sessionKey,
-      query.sessionId,
-    )
-  ) {
+  if (hasSessionActorEmptyPendingInputHistory(identity, resolved.sessionKey, query.sessionId)) {
     return { rows: [], total: 0 };
   }
   return withSessionHistoryWorkerDatabase(databaseOptions, async (owner) => {

@@ -180,7 +180,7 @@ export function bindSqliteWorkerBackend(
           // Related-parent builders still require their complete multi-entry projection.
           const store =
             retained &&
-            (upsert.relatedSessionKeys === undefined || !retained.entry.parentSessionKey)
+            (upsert?.relatedSessionKeys === undefined || !retained.entry.parentSessionKey)
               ? { [retained.sessionKey]: retained.entry }
               : readProjectedLifecycleStore(database, input);
           const identity = readOpenClawAgentDatabaseIdentity(database).identity;
