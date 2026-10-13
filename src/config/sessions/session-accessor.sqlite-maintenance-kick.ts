@@ -208,7 +208,16 @@ export function kickSessionEntryMaintenanceAfterWrite(
               })
             )
           ) {
-            const resume = created.noCandidates && !created.running;
+            const fact = created.ageFact;
+            const resume =
+              !created.running &&
+              (created.noCandidates ||
+                (fact?.entryCount !== undefined &&
+                  shouldRunSessionEntryMaintenance({
+                    entryCount: fact.entryCount,
+                    maxEntries: fact.maintenance.maxEntries,
+                    force: false,
+                  })));
             created.noCandidates = false;
             if (resume) {
               if (created.retryDelayMs !== undefined) {

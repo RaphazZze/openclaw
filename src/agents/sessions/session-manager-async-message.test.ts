@@ -78,10 +78,12 @@ const user = (key: string) => ({
   idempotencyKey: `${key}:user`,
 });
 
-it.for([false, true])(
-  "resumes idle protected-store maintenance after a lazy worker creates an eligible session (interrupted retry: %s)",
-  async (interruptedRetry, { signal }) => {
-    const storePath = state.statePath(`lazy-maintenance-${interruptedRetry}.sqlite`);
+it.for(["protected", "interrupted retry", "below cap"] as const)(
+  "resumes idle protected-store maintenance after a lazy worker creates an eligible session (starting state: %s)",
+  async (startingState, { signal }) => {
+    const interruptedRetry = startingState === "interrupted retry";
+    const belowCap = startingState === "below cap";
+    const storePath = state.statePath(`lazy-maintenance-${startingState}.sqlite`);
     const scope = { agentId: "main", path: storePath };
     const protectedKey = "agent:main:lazy-protected";
     const removedKey = "agent:main:lazy-removed";
@@ -90,7 +92,7 @@ it.for([false, true])(
     runOpenClawAgentWriteTransaction((database) => {
       for (const key of [
         protectedKey,
-        "agent:main:lazy-other-protected",
+        ...(belowCap ? [] : ["agent:main:lazy-other-protected"]),
         ...(interruptedRetry ? [removedKey] : []),
       ]) {
         writeSessionEntry(database, key, {
@@ -105,7 +107,7 @@ it.for([false, true])(
       archiveDirectory: path.join(path.dirname(storePath), "lazy-archives"),
       maintenanceConfig: {
         ...resolveMaintenanceConfigFromInput(),
-        maxEntries: 1,
+        maxEntries: belowCap ? 2 : 1,
         pruneAfterMs: 86_400_000,
         archiveDashboardAfterMs: null,
         preserveRecentMs: null,
@@ -127,6 +129,10 @@ it.for([false, true])(
         }
         const result = await run(params);
         if (result.kind === "maintenance-plan") {
+          if (belowCap && result.value.archived === 0) {
+            expect(result.value.durableNoCandidates).not.toBe(true);
+            settled.resolve();
+          }
           if (result.value.durableNoCandidates === true) {
             if (interruptedRetry && !retryInterrupted) {
               retryInterrupted = true;
@@ -165,6 +171,16 @@ it.for([false, true])(
         sessionKey: "agent:main:lazy-eligible",
         sessionId: "lazy-eligible",
       };
+      let victim = target;
+      if (belowCap) {
+        victim = { ...target, sessionKey: "agent:main:lazy-first", sessionId: "lazy-first" };
+        const first = await SessionManager.openAsync(victim, state.workspaceDir);
+        await first.appendMessageAsync(user("lazy-maintenance-first"));
+        await yieldToEventLoop();
+        await vi.advanceTimersByTimeAsync(1_001);
+        expect(passes).toBe(protectedPasses);
+        expect(loadSessionEntry(victim)?.archivedAt).toBeUndefined();
+      }
       const manager = await SessionManager.openAsync(target, state.workspaceDir);
       await manager.appendMessageAsync(user("lazy-maintenance"));
       expect(loadSessionEntry(target)?.sessionId).toBe(target.sessionId);
@@ -172,7 +188,7 @@ it.for([false, true])(
       await vi.advanceTimersByTimeAsync(1_001);
       expect(passes).toBeGreaterThan(protectedPasses);
       await withinTest(archived.promise, signal);
-      expect(loadSessionEntry(target)?.archiveReason).toBe("active-session-cap");
+      expect(loadSessionEntry(victim)?.archiveReason).toBe("active-session-cap");
       expect((await loadTranscriptEvents(target)).at(-1)).toMatchObject({
         message: user("lazy-maintenance"),
       });
