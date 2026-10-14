@@ -1,12 +1,17 @@
 import { existsSync } from "node:fs";
 import { setImmediate } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { observeHostDataSql } from "../../test/helpers/sqlite-statement-execution-counter.js";
 import { createTempDirTracker } from "../../test/helpers/temp-dir.js";
 import {
   prepareSystemAgentRunAdmission,
   resolveAdmittedRunActiveAssertion,
 } from "../agents/admitted-run-context.js";
-import { captureRuntimeConfigAsyncReader } from "../config/config.js";
+import { captureRuntimeConfigAsyncReader, getRuntimeConfig } from "../config/config.js";
+import {
+  getRuntimeConfigSourceSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../config/runtime-snapshot.js";
 import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
 import { memorySessionActorOwners } from "../config/sessions/session-actor-memory-owner.js";
 import { createDeferredCore } from "../shared/deferred.js";
@@ -62,7 +67,59 @@ afterEach(async () => {
 });
 
 describe("heartbeat outcome store", () => {
-  it("claims once without writing absent outcomes, durable retries, or another run's claim", async () => {
+  it("persists and claims the first outcome after reopening without host SQL", async () => {
+    const env = await createEnv();
+    const target = { agentId: "main", sessionKey: "agent:main:main", env };
+    await closeOpenClawAgentDatabasesAsync();
+    const host = observeHostDataSql();
+    try {
+      await persistHeartbeatOutcome({
+        ...target,
+        runSessionKey: "agent:main:main:heartbeat",
+        occurredAt: 100,
+        response: { outcome: "progress", notify: false, summary: "First after boot" },
+      });
+      expect(await claimHeartbeatOutcomeForRun({ ...target, runId: "first-run" })).toMatchObject({
+        summary: "First after boot",
+      });
+      expect(host.queries).toEqual([]);
+    } finally {
+      host.restore();
+    }
+    await closeOpenClawAgentDatabasesAsync();
+    expect(await claimHeartbeatOutcomeForRun({ ...target, runId: "first-run" })).toMatchObject({
+      summary: "First after boot",
+    });
+    expect(await claimHeartbeatOutcomeForRun({ ...target, runId: "second-run" })).toBeUndefined();
+  });
+
+  it("preserves absent storage when there is no durable base session", async () => {
+    const env = { OPENCLAW_STATE_DIR: tempDirs.make("openclaw-heartbeat-absent-") };
+    const target = { agentId: "main", sessionKey: "agent:main:main", env };
+    await persistHeartbeatOutcome({
+      ...target,
+      runSessionKey: "agent:main:main:heartbeat",
+      occurredAt: 100,
+      response: { outcome: "progress", notify: false, summary: "No durable session" },
+    });
+    expect(await claimHeartbeatOutcomeForRun({ ...target, runId: "first-run" })).toBeUndefined();
+    expect(existsSync(resolveOpenClawAgentSqlitePath(target))).toBe(false);
+  });
+
+  it("claims once without writing absent outcomes, durable retries, or another run's claim", async ({
+    onTestFinished,
+  }) => {
+    const config = getRuntimeConfig();
+    const sourceConfig = getRuntimeConfigSourceSnapshot();
+    onTestFinished(() => setRuntimeConfigSnapshot(config, sourceConfig ?? undefined));
+    // Count heartbeat writes without the fixture's independent automatic maintenance commit.
+    setRuntimeConfigSnapshot({
+      ...config,
+      session: {
+        ...config.session,
+        maintenance: { ...config.session?.maintenance, mode: "warn" },
+      },
+    });
     const env = await createEnv();
     const target = { agentId: "main", sessionKey: "agent:main:main", env };
     let commits = 0;

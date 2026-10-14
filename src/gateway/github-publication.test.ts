@@ -62,7 +62,7 @@ describe("Gateway GitHub publication", () => {
         }
       });
       expect(warning).toHaveBeenCalledExactlyOnceWith(
-        "Plugin publication-compat-diagnostic: deferOrphanedRequests is deprecated; use deferOrphanedRequestsAsync instead. This method no longer performs publication work; use its replacement. It will be removed in a later release after stable deprecation.",
+        "Plugin publication-compat-diagnostic: deferOrphanedRequests is deprecated; use deferOrphanedRequestsAsync instead. This method no longer performs publication work; use its replacement. Final compatibility day: 2026-12-31. Removal ships in the first January 2027 stable release; no SDK major is required.",
         { code: "DEP_PLUGIN_SDK", type: "DeprecationWarning" },
       );
     } finally {
@@ -888,10 +888,11 @@ describe("Gateway GitHub publication", () => {
     await persistClaimPublicationWorkspace();
     const loadSessionRuntime = async () => {
       const runtime = await import("./session-utils.js");
+      const worker = await import("./session-utils-store-worker.js");
       return {
         resolveCanonicalSessionEntryFromStoreKeys:
           runtime.resolveCanonicalSessionEntryFromStoreKeys,
-        resolveGatewaySessionStoreTargetInWorker: runtime.resolveGatewaySessionStoreTargetInWorker,
+        resolveGatewaySessionStoreTargetInWorker: worker.resolveGatewaySessionStoreTargetInWorker,
       };
     };
     const warnings: string[] = [];
